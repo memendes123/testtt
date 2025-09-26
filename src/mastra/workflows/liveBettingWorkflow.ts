@@ -4,16 +4,33 @@ import { RuntimeContext } from "@mastra/core/di";
 
 import { monitorLiveMatchesTool } from "../tools/monitorLiveMatches";
 import { sendTelegramMessageTool } from "../tools/sendTelegramMessage";
+import { REGION_LABEL } from "../constants/competitions";
 
 const runtimeContext = new RuntimeContext();
 
 // Define schemas
+const RegionEnum = z.enum(["Europe", "South America", "North America", "Asia", "Africa"]);
+
 const LiveMatchData = z.object({
   totalLiveMatches: z.number(),
   highDangerCount: z.number(),
   mediumDangerCount: z.number(),
   matches: z.array(z.any()),
   lastUpdated: z.string(),
+  metadata: z.object({
+    totalFixtures: z.number(),
+    supportedFixtures: z.number(),
+    processedFixtures: z.number(),
+    perRegion: z.array(
+      z.object({
+        region: RegionEnum,
+        label: z.string(),
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+      }),
+    ),
+  }),
 });
 
 const AlertResult = z.object({
@@ -25,7 +42,7 @@ const AlertResult = z.object({
 // Step 1: Monitor live matches
 const monitorLiveStep = createStep({
   id: "monitor-live-step",
-  description: "Monitor live European football matches for betting opportunities",
+  description: "Monitor live football matches in all supported competitions for betting opportunities",
   inputSchema: z.object({}),
   outputSchema: LiveMatchData,
   execute: async ({ mastra }) => {
@@ -38,9 +55,10 @@ const monitorLiveStep = createStep({
       mastra,
     });
 
-    logger?.info("✅ [MonitorLiveStep] Completed", { 
+    logger?.info("✅ [MonitorLiveStep] Completed", {
       liveMatches: result.totalLiveMatches,
-      highDanger: result.highDangerCount 
+      highDanger: result.highDangerCount,
+      perRegion: result.metadata.perRegion,
     });
 
     return result;
@@ -84,7 +102,10 @@ const sendLiveAlertsStep = createStep({
         
         alertMessage += `${dangerEmoji} <b>${match.teams.home.name} ${score} ${match.teams.away.name}</b>\n`;
         alertMessage += `⏱️ ${elapsed} | 🏆 ${match.league.name}\n`;
-        
+        if (match.competition && REGION_LABEL[match.competition.region as keyof typeof REGION_LABEL]) {
+          alertMessage += `🌍 ${REGION_LABEL[match.competition.region as keyof typeof REGION_LABEL]} • ${match.competition.country}\n`;
+        }
+
         if (match.dangerIndicators && match.dangerIndicators.length > 0) {
           alertMessage += `📈 ${match.dangerIndicators.join(", ")}\n`;
         }
