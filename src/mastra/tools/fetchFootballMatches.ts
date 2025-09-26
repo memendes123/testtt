@@ -2,7 +2,13 @@ import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
 
-import { identifyCompetition, isCompetitionSupported, REGION_LABEL, REGION_ORDER } from "../constants/competitions";
+import {
+  COMPETITION_REGIONS,
+  identifyCompetition,
+  isCompetitionSupported,
+  REGION_LABEL,
+  REGION_ORDER,
+} from "../constants/competitions";
 
 const fetchFootballMatchesFromAPI = async ({
   date,
@@ -151,6 +157,10 @@ const fetchFootballMatchesFromAPI = async ({
           odds: odds,
         });
 
+        if (!regionCounters[competition.region]) {
+          regionCounters[competition.region] = { total: 0 };
+        }
+
         regionCounters[competition.region].total += 1;
 
         // Add small delay to avoid rate limiting
@@ -170,7 +180,7 @@ const fetchFootballMatchesFromAPI = async ({
       perRegion: REGION_ORDER.map((region) => ({
         region,
         label: REGION_LABEL[region],
-        total: regionCounters[region].total,
+        total: regionCounters[region]?.total ?? 0,
       })),
     });
 
@@ -185,7 +195,7 @@ const fetchFootballMatchesFromAPI = async ({
         perRegion: REGION_ORDER.map((region) => ({
           region,
           label: REGION_LABEL[region],
-          total: regionCounters[region].total,
+          total: regionCounters[region]?.total ?? 0,
         })),
       },
     };
@@ -219,7 +229,7 @@ export const fetchFootballMatchesTool = createTool({
       competition: z.object({
         key: z.string(),
         name: z.string(),
-        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        region: z.enum(COMPETITION_REGIONS),
         type: z.enum(["league", "cup", "supercup"]),
         country: z.string(),
       }),
@@ -242,7 +252,7 @@ export const fetchFootballMatchesTool = createTool({
       processedFixtures: z.number(),
       perRegion: z.array(
         z.object({
-          region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+          region: z.enum(COMPETITION_REGIONS),
           label: z.string(),
           total: z.number(),
         }),

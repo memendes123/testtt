@@ -5,11 +5,12 @@ import { RuntimeContext } from "@mastra/core/di";
 import { fetchFootballMatchesTool } from "../tools/fetchFootballMatches";
 import { analyzeOddsAndMarketsTool } from "../tools/analyzeOddsAndMarkets";
 import { sendTelegramMessageTool } from "../tools/sendTelegramMessage";
+import { COMPETITION_REGIONS } from "../constants/competitions";
 
 const runtimeContext = new RuntimeContext();
 
 // Define common schemas for type safety
-const RegionEnum = z.enum(["Europe", "South America", "North America", "Asia", "Africa"]);
+const RegionEnum = z.enum(COMPETITION_REGIONS);
 
 const RegionBreakdown = z.object({
   region: RegionEnum,
