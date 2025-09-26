@@ -2,7 +2,13 @@ import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
 
-import { identifyCompetition, isCompetitionSupported, REGION_LABEL, REGION_ORDER } from "../constants/competitions";
+import {
+  COMPETITION_REGIONS,
+  identifyCompetition,
+  isCompetitionSupported,
+  REGION_LABEL,
+  REGION_ORDER,
+} from "../constants/competitions";
 
 const monitorLiveMatchesFromAPI = async ({
   logger,
@@ -206,6 +212,10 @@ const monitorLiveMatchesFromAPI = async ({
 
         liveMatches.push(match);
 
+        if (!regionCounters[competition.region]) {
+          regionCounters[competition.region] = { total: 0, high: 0, medium: 0 };
+        }
+
         const counters = regionCounters[competition.region];
         counters.total += 1;
         if (match.dangerLevel === "high") {
@@ -232,9 +242,9 @@ const monitorLiveMatchesFromAPI = async ({
       perRegion: REGION_ORDER.map((region) => ({
         region,
         label: REGION_LABEL[region],
-        total: regionCounters[region].total,
-        high: regionCounters[region].high,
-        medium: regionCounters[region].medium,
+        total: regionCounters[region]?.total ?? 0,
+        high: regionCounters[region]?.high ?? 0,
+        medium: regionCounters[region]?.medium ?? 0,
       })),
     });
 
@@ -251,9 +261,9 @@ const monitorLiveMatchesFromAPI = async ({
         perRegion: REGION_ORDER.map((region) => ({
           region,
           label: REGION_LABEL[region],
-          total: regionCounters[region].total,
-          high: regionCounters[region].high,
-          medium: regionCounters[region].medium,
+          total: regionCounters[region]?.total ?? 0,
+          high: regionCounters[region]?.high ?? 0,
+          medium: regionCounters[region]?.medium ?? 0,
         })),
       },
     };
@@ -283,7 +293,7 @@ export const monitorLiveMatchesTool = createTool({
       competition: z.object({
         key: z.string(),
         name: z.string(),
-        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        region: z.enum(COMPETITION_REGIONS),
         type: z.enum(["league", "cup", "supercup"]),
         country: z.string(),
       }),
@@ -314,12 +324,12 @@ export const monitorLiveMatchesTool = createTool({
       totalFixtures: z.number(),
       supportedFixtures: z.number(),
       processedFixtures: z.number(),
-      perRegion: z.array(
-        z.object({
-          region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
-          label: z.string(),
-          total: z.number(),
-          high: z.number(),
+        perRegion: z.array(
+          z.object({
+            region: z.enum(COMPETITION_REGIONS),
+            label: z.string(),
+            total: z.number(),
+            high: z.number(),
           medium: z.number(),
         }),
       ),
