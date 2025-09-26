@@ -1,0 +1,143 @@
+# Bot de Previsões de Futebol – Guia Completo de Auto-hospedagem
+
+Este repositório contém duas portas independentes (Python e Node.js) do fluxo original criado no Mastra. Ambas implementam o mesmo pipeline:
+
+1. **Busca dos jogos e odds** na API Football para as competições listadas em `shared/competitions.json`.
+2. **Análise das probabilidades**, convertendo as odds em percentuais, destacando favoritos, mercados de gols e ambos marcam (ver `python_bot/analyzer.py`).
+3. **Formatação do relatório** em blocos por região, com destaques de confiança e resumo agregado.
+4. **Envio opcional via Telegram**, usando o bot e canal que você configurar.
+
+> As duas versões produzem o mesmo texto e podem ser usadas tanto para execuções avulsas quanto para rotinas automatizadas (cron, PM2, systemd etc.).
+
+---
+
+## 1. Credenciais necessárias
+
+| Variável | Obrigatória | Descrição |
+| --- | --- | --- |
+| `FOOTBALL_API_KEY` | ✅ | Chave da [API-Football](https://dashboard.api-football.com/). Usada para baixar partidas, odds e estatísticas. |
+| `TELEGRAM_BOT_TOKEN` | ✅ | Token do bot criado com o @BotFather. Necessário mesmo para testes locais (as mensagens de teste ficam em memória). |
+| `TELEGRAM_DEFAULT_CHAT_ID` | ⚪️ | Chat ou usuário que receberá o relatório por padrão. Pode ser o ID numérico do seu usuário ou de um grupo. |
+| `TELEGRAM_CHANNEL_ID` | ⚪️ | Canal público (ex.: `@meucanal`) caso queira publicar automaticamente. |
+| `FOOTBALL_API_BOOKMAKER` | ⚪️ | ID do bookmaker desejado (padrão `6` – Pinnacle). |
+| `FOOTBALL_MAX_FIXTURES` | ⚪️ | Limite de jogos carregados por execução (padrão `120`). |
+
+### Guardando os segredos com segurança
+
+1. Crie um arquivo `.env` na raiz do projeto (ele já está ignorado pelo git).
+2. Copie o exemplo abaixo e preencha com seus dados reais:
+
+```env
+FOOTBALL_API_KEY=coloque_sua_chave_aqui
+TELEGRAM_BOT_TOKEN=coloque_seu_token_do_bot
+TELEGRAM_DEFAULT_CHAT_ID=123456789
+TELEGRAM_CHANNEL_ID=@seu_canal
+FOOTBALL_API_BOOKMAKER=6
+FOOTBALL_MAX_FIXTURES=120
+```
+
+> Nunca compartilhe esse arquivo ou faça commit. Em VPS ou serviços como Replit, cadastre as variáveis de ambiente diretamente no painel para evitar expor as credenciais.
+
+---
+
+## 2. Executando no seu computador (recomendado)
+
+### Python
+
+1. **Instale as dependências:**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   pip install -r python_bot/requirements.txt
+   ```
+2. **Rode um teste sem enviar mensagem:**
+   ```bash
+   python -m python_bot.main --env .env --dry-run
+   ```
+   O script baixa os jogos do dia, calcula probabilidades e imprime o relatório formatado no terminal.
+3. **Envie para o Telegram:**
+   ```bash
+   python -m python_bot.main --env .env
+   ```
+4. **Executar diariamente automaticamente:** use um agendador do sistema:
+   * **Linux/macOS:** `crontab -e` → `0 9 * * * /caminho/para/.venv/bin/python -m python_bot.main --env /caminho/para/.env`
+   * **Windows:** Agendador de Tarefas apontando para `python.exe -m python_bot.main --env C:\caminho\.env`
+
+### Node.js
+
+1. **Instale dependências (Node 18+):** `npm install`
+2. **Execute o CLI em modo teste:**
+   ```bash
+   node js_bot/index.js --env .env --dry-run
+   ```
+3. **Envie para o Telegram:**
+   ```bash
+   node js_bot/index.js --env .env
+   ```
+4. **Mantenha rodando continuamente:** use `pm2` ou `forever` para agendar execuções:
+   ```bash
+   npx pm2 start "node js_bot/index.js --env /caminho/.env" --name futebol-bot --cron "0 9 * * *"
+   ```
+
+> Ambas as versões aceitam `--date YYYY-MM-DD` para backfill e `--output arquivo.json` para salvar o payload completo.
+
+---
+
+## 3. Deixando online 24/7 na sua máquina
+
+Se quiser manter o bot emitindo alertas frequentes (ex.: a cada hora) enquanto seu PC está ligado:
+
+1. **Crie um script de loop** (exemplo Python):
+   ```bash
+   while true; do
+     python -m python_bot.main --env /caminho/.env
+     sleep 3600  # aguarda 1 hora
+   done
+   ```
+2. **Execute dentro de `screen` ou `tmux`** para não depender da sessão aberta.
+3. **Configure o sistema para iniciar com o computador:**
+   * Linux (systemd): crie `/etc/systemd/system/futebol-bot.service` apontando para o comando acima.
+   * Windows: use o [NSSM](https://nssm.cc/) para transformar o comando em serviço.
+
+Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use um VPS ou serviço na nuvem.
+
+---
+
+## 4. Publicando no Replit com execução contínua
+
+1. Faça upload dos diretórios `python_bot`, `js_bot`, `shared` e do arquivo `shared/competitions.json` para o seu Replit.
+2. No painel **Secrets**, cadastre as variáveis `FOOTBALL_API_KEY`, `TELEGRAM_BOT_TOKEN` etc.
+3. Escolha qual runtime deseja manter:
+   * **Python:** defina o comando de execução para `python -m python_bot.main`.
+   * **Node:** defina o comando de execução para `node js_bot/index.js`.
+4. Para manter o Replit sempre ativo:
+   * Use o plano Hacker (mantém a instância viva) **ou**
+   * Configure um ping externo (ex.: UptimeRobot) chamando a webview gerada pelo Replit a cada 5 minutos.
+5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais.
+
+> Replit pausa o container após inatividade em contas gratuitas. O ping externo mantém a execução, mas se o processo falhar será necessário abrir o projeto e reiniciar manualmente.
+
+---
+
+## 5. Como a análise funciona
+
+* **Conversão de odds em probabilidade:** cada odd decimal é convertida em percentual (`100 / odd`).
+* **Classificação de confiança:** partidas com probabilidades altas geram recomendações "Forte favorito" ou "Favorito". Mercados Over/Under e Ambos Marcam entram na lista caso ultrapassem 60%.
+* **Pontuação e ordenação:** os jogos são reordenados por confiança e quantidade de recomendações, exibindo os melhores primeiro e organizando por região/competição.
+* **Resumo agregado:** o relatório mostra quantos jogos de alta ou média confiança existem por região, ajudando a priorizar ligas.
+
+Para ver a lógica exata consulte:
+
+* `python_bot/analyzer.py` – regras de probabilidade, recomendações e agrupamento.
+* `python_bot/fetcher.py` – chamada à API-Football com filtros de liga, bookmaker e data.
+* `python_bot/message_builder.py` – montagem do texto final (usado também pela versão Node).
+
+---
+
+## 6. Próximos passos sugeridos
+
+* Ajuste a lista de competições em `shared/competitions.json` para focar apenas nos campeonatos desejados.
+* Ajuste os thresholds de confiança no `analyzer.py` caso queira alertas mais conservadores ou agressivos.
+* Integre com outras saídas (Discord, e-mail) reutilizando a função `message_builder.build_message`.
+
+Com esse guia você consegue hospedar o bot no seu PC, VPS ou Replit, mantendo as credenciais seguras e garantindo execuções automáticas confiáveis.
