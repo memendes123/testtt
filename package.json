@@ -8,7 +8,8 @@
     "build": "mastra build",
     "check": "tsc",
     "check:format": "prettier --check '**/*.ts'",
-    "format": "prettier --write '**/*.ts'"
+    "format": "prettier --write '**/*.ts'",
+    "healthcheck": "tsx src/scripts/healthCheck.ts"
   },
   "keywords": [],
   "type": "module",
