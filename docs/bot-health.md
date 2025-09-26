@@ -14,6 +14,7 @@ O bot depende de variáveis para comunicar com APIs externas e persistir estado:
 | Variável | Obrigatória | Descrição |
 | --- | --- | --- |
 | `FOOTBALL_API_KEY` | ✅ | Chave do API-Football (plano gratuito disponível com limites) para recolher jogos, estatísticas e odds. |
+| `FOOTBALL_API_KEY` | ✅ | Chave do API-Football para recolher jogos, estatísticas e odds. |
 | `TELEGRAM_BOT_TOKEN` | ✅ | Token do bot Telegram usado para enviar mensagens. |
 | `TELEGRAM_CHANNEL_ID` | ⚠️ | ID opcional de canal para difusão pública. |
 | `DATABASE_URL` | ⚠️ | URL Postgres usado pelo armazenamento do Mastra e pelo `inngest-cli`. |
@@ -36,6 +37,9 @@ O script:
 4. Faz um dry-run local da tool `analyze-odds-and-markets` com dados fictícios para validar o cálculo de probabilidades, o agrupamento por região e as recomendações.
 5. Simula o envio Telegram injectando uma resposta mock à API, assegurando que a mensagem formatada é produzida sem contactar a internet.
 6. Quando `RUN_EXTERNAL_CHECKS=1`, chama `fetchFootballMatchesTool` e `monitorLiveMatchesTool` contra o API real (com a respectiva chave) e reporta o resultado, incluindo a contagem por região; caso contrário, assinala que esses testes ficaram pendentes.
+4. Faz um dry-run local da tool `analyze-odds-and-markets` com dados fictícios para validar o cálculo de probabilidades e recomendações.
+5. Simula o envio Telegram injectando uma resposta mock à API, assegurando que a mensagem formatada é produzida sem contactar a internet.
+6. Quando `RUN_EXTERNAL_CHECKS=1`, chama `fetchFootballMatchesTool` e `monitorLiveMatchesTool` contra o API real (com a respectiva chave) e reporta o resultado; caso contrário, assinala que esses testes ficaram pendentes.
 
 O resultado é apresentado no terminal com o estado **PASS/WARN/FAIL** de cada verificação.
 
@@ -60,5 +64,6 @@ Além do health-check automático, recomenda-se:
 - A tool `fetchFootballMatches` suporta automaticamente as ligas e taças listadas pelo utilizador, distribuídas por Europa, América do Sul, América do Norte, Ásia/Médio Oriente e África. O resumo diário apresenta os totais e destaques por região, garantindo que cada grupo recebe pelo menos três recomendações sempre que existam odds disponíveis.
 - O monitoramento ao vivo (`monitor-live-matches` + `live-betting-workflow`) usa o mesmo filtro de competições, pelo que os alertas consideram campeonatos e taças globais.
 - Todos os dados provêm do API-Football, que oferece um escalão gratuito suficiente para testes e para uma execução diária. Caso seja necessário reforçar o número de chamadas gratuitas para mercados específicos, prepare chaves adicionais de APIs públicas (por exemplo, API-FOOTBALL free tier adicional, Football-Data.org ou APIs federativas) e partilhe-as para integração futura.
+
 
 Com estes passos consegue garantir que o bot está funcional e pronto para produção ou demonstração.
