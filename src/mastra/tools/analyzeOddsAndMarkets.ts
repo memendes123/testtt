@@ -2,6 +2,16 @@ import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
 
+import { REGION_LABEL, REGION_ORDER } from "../constants/competitions";
+
+type AnalyzedMatch = any & {
+  competition?: {
+    region?: string;
+  };
+  confidence: "low" | "medium" | "high";
+  recommendedBets: string[];
+};
+
 const analyzeMatchOdds = ({
   matches,
   logger,
@@ -11,13 +21,13 @@ const analyzeMatchOdds = ({
 }) => {
   logger?.info("🔧 [AnalyzeOddsAndMarkets] Starting analysis", { matchCount: matches.length });
 
-  const analyzedMatches = matches.map((match) => {
-    logger?.info("📝 [AnalyzeOddsAndMarkets] Analyzing match", { 
-      homeTeam: match.teams.home.name, 
-      awayTeam: match.teams.away.name 
+  const analyzedMatches: AnalyzedMatch[] = matches.map((match) => {
+    logger?.info("📝 [AnalyzeOddsAndMarkets] Analyzing match", {
+      homeTeam: match.teams.home.name,
+      awayTeam: match.teams.away.name
     });
 
-    const analysis = {
+    const analysis: AnalyzedMatch = {
       ...match,
       predictions: {
         homeWinProbability: 0,
@@ -160,14 +170,46 @@ const analyzeMatchOdds = ({
   });
 
   // Sort matches by confidence and probability strength
-  const sortedMatches = analyzedMatches.sort((a, b) => {
-    const confidenceScore: Record<string, number> = { high: 3, medium: 2, low: 1 };
-    const aScore = (confidenceScore[a.confidence] || 0) * 10 + a.recommendedBets.length;
-    const bScore = (confidenceScore[b.confidence] || 0) * 10 + b.recommendedBets.length;
-    return bScore - aScore;
+  const confidenceScore: Record<string, number> = { high: 3, medium: 2, low: 1 };
+  const computeScore = (match: AnalyzedMatch) =>
+    (confidenceScore[match.confidence] || 0) * 10 + (match.recommendedBets?.length || 0);
+
+  const sortedMatches = analyzedMatches.sort((a, b) => computeScore(b) - computeScore(a));
+
+  const regionBuckets: Record<string, AnalyzedMatch[]> = {};
+  REGION_ORDER.forEach((region) => {
+    regionBuckets[region] = [];
   });
 
-  logger?.info("✅ [AnalyzeOddsAndMarkets] Analysis completed successfully", { 
+  analyzedMatches.forEach((match) => {
+    const region = match.competition?.region;
+    if (region && regionBuckets[region]) {
+      regionBuckets[region].push(match);
+    }
+  });
+
+  const breakdownByRegion = REGION_ORDER.map((region) => {
+    const matchesForRegion = regionBuckets[region];
+    return {
+      region,
+      label: REGION_LABEL[region],
+      total: matchesForRegion.length,
+      highConfidence: matchesForRegion.filter((match) => match.confidence === "high").length,
+      mediumConfidence: matchesForRegion.filter((match) => match.confidence === "medium").length,
+    };
+  });
+
+  const bestMatchesByRegion = REGION_ORDER.map((region) => {
+    const matchesForRegion = regionBuckets[region];
+    const sortedRegionMatches = matchesForRegion.sort((a, b) => computeScore(b) - computeScore(a));
+    return {
+      region,
+      label: REGION_LABEL[region],
+      matches: sortedRegionMatches.slice(0, 5),
+    };
+  });
+
+  logger?.info("✅ [AnalyzeOddsAndMarkets] Analysis completed successfully", {
     totalMatches: analyzedMatches.length,
     highConfidenceMatches: sortedMatches.filter(m => m.confidence === "high").length
   });
@@ -177,6 +219,8 @@ const analyzeMatchOdds = ({
     bestMatches: sortedMatches.slice(0, 10), // Return top 10 best matches
     highConfidenceCount: sortedMatches.filter(m => m.confidence === "high").length,
     mediumConfidenceCount: sortedMatches.filter(m => m.confidence === "medium").length,
+    breakdownByRegion,
+    bestMatchesByRegion,
   };
 };
 
@@ -191,6 +235,22 @@ export const analyzeOddsAndMarketsTool = createTool({
     bestMatches: z.array(z.any()),
     highConfidenceCount: z.number(),
     mediumConfidenceCount: z.number(),
+    breakdownByRegion: z.array(
+      z.object({
+        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        label: z.string(),
+        total: z.number(),
+        highConfidence: z.number(),
+        mediumConfidence: z.number(),
+      }),
+    ),
+    bestMatchesByRegion: z.array(
+      z.object({
+        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        label: z.string(),
+        matches: z.array(z.any()),
+      }),
+    ),
   }),
   execute: async ({ context: { matches }, mastra }) => {
     const logger = mastra?.getLogger();

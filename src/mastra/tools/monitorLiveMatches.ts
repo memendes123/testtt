@@ -2,6 +2,8 @@ import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
 
+import { identifyCompetition, isCompetitionSupported, REGION_LABEL, REGION_ORDER } from "../constants/competitions";
+
 const monitorLiveMatchesFromAPI = async ({
   logger,
 }: {
@@ -15,14 +17,11 @@ const monitorLiveMatchesFromAPI = async ({
   }
 
   try {
-    // European leagues (Premier League, La Liga, Bundesliga, Serie A, Ligue 1, etc.)
-    const europeanLeagues = [39, 140, 78, 135, 61, 2, 3, 88, 94, 203];
-    
-    logger?.info("📝 [MonitorLiveMatches] Fetching live matches for European leagues");
+    logger?.info("📝 [MonitorLiveMatches] Fetching live fixtures for supported competitions");
 
     // Fetch live fixtures (status: 1H, 2H, HT, ET, P, etc.)
     const liveResponse = await fetch(
-      `https://v3.football.api-sports.io/fixtures?live=all&league=${europeanLeagues.join(',')}`,
+      `https://v3.football.api-sports.io/fixtures?live=all`,
       {
         headers: {
           "X-RapidAPI-Key": apiKey,
@@ -36,21 +35,52 @@ const monitorLiveMatchesFromAPI = async ({
     }
 
     const liveData = await liveResponse.json();
-    logger?.info("📝 [MonitorLiveMatches] Received live fixtures data", { 
-      liveMatchCount: liveData.response?.length || 0 
+    const totalFixtures = liveData.response?.length || 0;
+    logger?.info("📝 [MonitorLiveMatches] Received live fixtures data", {
+      liveMatchCount: totalFixtures,
     });
 
-    const liveMatches = [];
+    const supportedFixtures = (liveData.response || []).filter((fixture: any) => isCompetitionSupported(fixture.league));
+
+    logger?.info("📝 [MonitorLiveMatches] Filtered live fixtures for supported competitions", {
+      totalSupported: supportedFixtures.length,
+    });
+
+    const MAX_LIVE_FIXTURES = 120;
+    const fixturesToProcess = supportedFixtures.slice(0, MAX_LIVE_FIXTURES);
+
+    if (supportedFixtures.length > MAX_LIVE_FIXTURES) {
+      logger?.warn("📝 [MonitorLiveMatches] Limiting live fixtures due to processing cap", {
+        cap: MAX_LIVE_FIXTURES,
+        skipped: supportedFixtures.length - MAX_LIVE_FIXTURES,
+      });
+    }
+
+    const liveMatches: any[] = [];
+    const regionCounters: Record<string, { total: number; high: number; medium: number }> = {};
+    REGION_ORDER.forEach((region) => {
+      regionCounters[region] = { total: 0, high: 0, medium: 0 };
+    });
 
     // Process each live match
-    for (const fixture of liveData.response || []) {
+    for (const fixture of fixturesToProcess) {
       try {
-        logger?.info("📝 [MonitorLiveMatches] Processing live match", { 
-          homeTeam: fixture.teams.home.name, 
+        logger?.info("📝 [MonitorLiveMatches] Processing live match", {
+          homeTeam: fixture.teams.home.name,
           awayTeam: fixture.teams.away.name,
           status: fixture.fixture.status.short,
           elapsed: fixture.fixture.status.elapsed
         });
+
+        const competition = identifyCompetition(fixture.league);
+        if (!competition) {
+          logger?.warn("📝 [MonitorLiveMatches] Competition not supported after filtering", {
+            leagueName: fixture.league?.name,
+            leagueId: fixture.league?.id,
+            country: fixture.league?.country,
+          });
+          continue;
+        }
 
         // Get detailed match statistics
         const statsResponse = await fetch(
@@ -138,11 +168,18 @@ const monitorLiveMatchesFromAPI = async ({
           dangerIndicators.push(`${recentGoals.length} golos recentes`);
         }
 
-        liveMatches.push({
+        const match = {
           fixtureId: fixture.fixture.id,
           league: {
             name: fixture.league.name,
             country: fixture.league.country,
+          },
+          competition: {
+            key: competition.key,
+            name: competition.displayName,
+            region: competition.region,
+            type: competition.type,
+            country: competition.country,
           },
           teams: {
             home: {
@@ -165,7 +202,17 @@ const monitorLiveMatchesFromAPI = async ({
           statistics,
           recentEvents: events.slice(-5), // Last 5 events
           lastUpdated: new Date().toISOString(),
-        });
+        };
+
+        liveMatches.push(match);
+
+        const counters = regionCounters[competition.region];
+        counters.total += 1;
+        if (match.dangerLevel === "high") {
+          counters.high += 1;
+        } else if (match.dangerLevel === "medium") {
+          counters.medium += 1;
+        }
 
         // Small delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 200));
@@ -179,9 +226,16 @@ const monitorLiveMatchesFromAPI = async ({
       }
     }
 
-    logger?.info("✅ [MonitorLiveMatches] Completed successfully", { 
+    logger?.info("✅ [MonitorLiveMatches] Completed successfully", {
       totalLiveMatches: liveMatches.length,
-      highDangerMatches: liveMatches.filter(m => m.dangerLevel === "high").length
+      highDangerMatches: liveMatches.filter(m => m.dangerLevel === "high").length,
+      perRegion: REGION_ORDER.map((region) => ({
+        region,
+        label: REGION_LABEL[region],
+        total: regionCounters[region].total,
+        high: regionCounters[region].high,
+        medium: regionCounters[region].medium,
+      })),
     });
 
     return {
@@ -190,6 +244,18 @@ const monitorLiveMatchesFromAPI = async ({
       mediumDangerCount: liveMatches.filter(m => m.dangerLevel === "medium").length,
       matches: liveMatches,
       lastUpdated: new Date().toISOString(),
+      metadata: {
+        totalFixtures,
+        supportedFixtures: supportedFixtures.length,
+        processedFixtures: fixturesToProcess.length,
+        perRegion: REGION_ORDER.map((region) => ({
+          region,
+          label: REGION_LABEL[region],
+          total: regionCounters[region].total,
+          high: regionCounters[region].high,
+          medium: regionCounters[region].medium,
+        })),
+      },
     };
 
   } catch (error) {
@@ -202,7 +268,7 @@ const monitorLiveMatchesFromAPI = async ({
 
 export const monitorLiveMatchesTool = createTool({
   id: "monitor-live-matches",
-  description: "Monitors live European football matches for betting opportunities and goal events",
+  description: "Monitors live football matches across supported global competitions for betting opportunities and goal events",
   inputSchema: z.object({}),
   outputSchema: z.object({
     totalLiveMatches: z.number(),
@@ -212,6 +278,13 @@ export const monitorLiveMatchesTool = createTool({
       fixtureId: z.number(),
       league: z.object({
         name: z.string(),
+        country: z.string(),
+      }),
+      competition: z.object({
+        key: z.string(),
+        name: z.string(),
+        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        type: z.enum(["league", "cup", "supercup"]),
         country: z.string(),
       }),
       teams: z.object({
@@ -237,6 +310,20 @@ export const monitorLiveMatchesTool = createTool({
       lastUpdated: z.string(),
     })),
     lastUpdated: z.string(),
+    metadata: z.object({
+      totalFixtures: z.number(),
+      supportedFixtures: z.number(),
+      processedFixtures: z.number(),
+      perRegion: z.array(
+        z.object({
+          region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+          label: z.string(),
+          total: z.number(),
+          high: z.number(),
+          medium: z.number(),
+        }),
+      ),
+    }),
   }),
   execute: async ({ mastra }) => {
     const logger = mastra?.getLogger();

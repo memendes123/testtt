@@ -9,10 +9,38 @@ import { sendTelegramMessageTool } from "../tools/sendTelegramMessage";
 const runtimeContext = new RuntimeContext();
 
 // Define common schemas for type safety
+const RegionEnum = z.enum(["Europe", "South America", "North America", "Asia", "Africa"]);
+
+const RegionBreakdown = z.object({
+  region: RegionEnum,
+  label: z.string(),
+  total: z.number(),
+  highConfidence: z.number(),
+  mediumConfidence: z.number(),
+});
+
+const RegionMatches = z.object({
+  region: RegionEnum,
+  label: z.string(),
+  matches: z.array(z.any()),
+});
+
 const MatchData = z.object({
   date: z.string(),
   totalMatches: z.number(),
   matches: z.array(z.any()),
+  metadata: z.object({
+    totalFixtures: z.number(),
+    supportedFixtures: z.number(),
+    processedFixtures: z.number(),
+    perRegion: z.array(
+      z.object({
+        region: RegionEnum,
+        label: z.string(),
+        total: z.number(),
+      }),
+    ),
+  }),
 });
 
 const AnalysisResult = z.object({
@@ -25,6 +53,8 @@ const AnalysisResult = z.object({
     bestMatches: z.array(z.any()),
     highConfidenceCount: z.number(),
     mediumConfidenceCount: z.number(),
+    breakdownByRegion: z.array(RegionBreakdown),
+    bestMatchesByRegion: z.array(RegionMatches),
   }),
 });
 
@@ -38,6 +68,7 @@ const FinalResult = z.object({
     totalMatches: z.number(),
     analyzedMatches: z.number(),
     highConfidenceMatches: z.number(),
+    regionBreakdown: z.array(RegionBreakdown),
   }),
 });
 
@@ -63,8 +94,9 @@ const fetchMatchesStep = createStep({
       mastra,
     });
 
-    logger?.info("✅ [FetchMatchesStep] Completed successfully", { 
-      totalMatches: result.totalMatches 
+    logger?.info("✅ [FetchMatchesStep] Completed successfully", {
+      totalMatches: result.totalMatches,
+      perRegion: result.metadata.perRegion,
     });
 
     return result;
@@ -126,52 +158,74 @@ const sendPredictionsStep = createStep({
     });
 
     let message = `🏆 <b>PREVISÕES FUTEBOL - ${date.toUpperCase()}</b>\n\n`;
-    message += `📊 <b>Resumo do Dia:</b>\n`;
-    message += `• ${originalData.totalMatches} jogos analisados\n`;
-    message += `• ${analysis.highConfidenceCount} jogos de alta confiança\n`;
-    message += `• ${analysis.mediumConfidenceCount} jogos de média confiança\n\n`;
+    message += `📊 <b>Resumo Global:</b>\n`;
+    message += `• ${originalData.totalMatches} jogos elegíveis nas competições suportadas\n`;
+    message += `• ${analysis.totalAnalyzed} jogos com odds válidas analisados\n`;
+    message += `• ${analysis.highConfidenceCount} jogos de alta confiança | ${analysis.mediumConfidenceCount} de média confiança\n\n`;
+
+    const activeRegions = analysis.breakdownByRegion.filter((region) => region.total > 0);
+    if (activeRegions.length > 0) {
+      message += `🌍 <b>Distribuição por Região:</b>\n`;
+      activeRegions.forEach((region) => {
+        message += `• ${region.label}: ${region.total} jogos (${region.highConfidence} alta | ${region.mediumConfidence} média)\n`;
+      });
+      message += `\n`;
+    }
+
+    const globalHighlights = analysis.bestMatches.slice(0, Math.min(5, analysis.bestMatches.length));
+    if (globalHighlights.length > 0) {
+      message += `🔥 <b>TOP GLOBAL (${globalHighlights.length})</b>\n`;
+      globalHighlights.forEach((match: any, index: number) => {
+        const confidenceEmoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
+        const competitionLabel = match.competition ? `${match.competition.name} • ${match.competition.country}` : match.league.name;
+        message += `${confidenceEmoji} <b>${match.teams.home.name} vs ${match.teams.away.name}</b> — ${competitionLabel}\n`;
+        message += `⏰ ${match.time} | 🏆 ${match.league.name}\n`;
+        if (match.recommendedBets && match.recommendedBets.length > 0) {
+          message += `🎯 ${match.recommendedBets.join(' | ')}\n`;
+        }
+        if (match.predictions) {
+          message += `📈 Prob: Casa ${match.predictions.homeWinProbability}% | Empate ${match.predictions.drawProbability}% | Fora ${match.predictions.awayWinProbability}%\n`;
+        }
+        message += `\n`;
+      });
+    }
 
     if (analysis.bestMatches.length === 0) {
       message += `😔 <b>Não há jogos com odds interessantes hoje.</b>\n`;
       message += `Voltamos amanhã com mais análises!\n\n`;
       message += `📈 Tip: Verifique os jogos ao vivo durante o dia para oportunidades em tempo real.`;
     } else {
-      message += `🎯 <b>MELHORES JOGOS DO DIA:</b>\n\n`;
+      const regionalHighlights = analysis.bestMatchesByRegion.filter((region) => region.matches.length > 0);
 
-      // Show top matches (limit to 8 to avoid message being too long)
-      const topMatches = analysis.bestMatches.slice(0, 8);
-      
-      topMatches.forEach((match: any, index: number) => {
-        const confidenceEmoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
-        
-        message += `${confidenceEmoji} <b>${match.teams.home.name} vs ${match.teams.away.name}</b>\n`;
-        message += `🏟️ ${match.league.name} | ⏰ ${match.time}\n`;
-        
-        if (match.recommendedBets && match.recommendedBets.length > 0) {
-          match.recommendedBets.forEach((bet: string) => {
-            message += `${bet}\n`;
+      if (regionalHighlights.length > 0) {
+        message += `🌎 <b>Destaques por Região</b>\n\n`;
+        regionalHighlights.forEach((region) => {
+          const matches = region.matches.slice(0, 3);
+          message += `🔹 <b>${region.label}</b> — ${matches.length} recomendações\n`;
+          matches.forEach((match: any) => {
+            const confidenceEmoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
+            const competitionLabel = match.competition ? `${match.competition.name} (${match.competition.type === 'cup' ? 'Taça' : match.competition.type === 'supercup' ? 'Supertaça' : 'Liga'})` : match.league.name;
+            message += `${confidenceEmoji} <b>${match.teams.home.name} vs ${match.teams.away.name}</b>\n`;
+            message += `🏟️ ${competitionLabel} | ⏰ ${match.time}\n`;
+
+            if (match.recommendedBets && match.recommendedBets.length > 0) {
+              message += `🎯 ${match.recommendedBets.join(' | ')}\n`;
+            }
+
+            if (match.predictions) {
+              const predictions = match.predictions;
+              message += `📈 Casa ${predictions.homeWinProbability}% | Empate ${predictions.drawProbability}% | Fora ${predictions.awayWinProbability}%\n`;
+              if (predictions.over25Probability > 0 || predictions.under25Probability > 0) {
+                message += `⚽ O/U 2.5: ${predictions.over25Probability}% / ${predictions.under25Probability}%\n`;
+              }
+              if (predictions.bttsYesProbability > 0 || predictions.bttsNoProbability > 0) {
+                message += `🥅 BTTS: Sim ${predictions.bttsYesProbability}% | Não ${predictions.bttsNoProbability}%\n`;
+              }
+            }
+
+            message += `\n`;
           });
-        }
-        
-        // Add probabilities summary
-        if (match.predictions) {
-          const predictions = match.predictions;
-          message += `📈 Probabilidades: Casa ${predictions.homeWinProbability}% | Empate ${predictions.drawProbability}% | Fora ${predictions.awayWinProbability}%\n`;
-          
-          if (predictions.over25Probability > 0 || predictions.under25Probability > 0) {
-            message += `⚽ Over/Under 2.5: ${predictions.over25Probability}%/${predictions.under25Probability}%\n`;
-          }
-          
-          if (predictions.bttsYesProbability > 0 || predictions.bttsNoProbability > 0) {
-            message += `🥅 BTTS: Sim ${predictions.bttsYesProbability}% | Não ${predictions.bttsNoProbability}%\n`;
-          }
-        }
-        
-        message += `\n`;
-      });
-
-      if (analysis.bestMatches.length > 8) {
-        message += `📋 <i>Mostrando ${topMatches.length} de ${analysis.bestMatches.length} jogos analisados...</i>\n\n`;
+        });
       }
     }
 
@@ -179,6 +233,7 @@ const sendPredictionsStep = createStep({
     message += `• Aposte com responsabilidade\n`;
     message += `• Nunca aposte mais do que pode perder\n`;
     message += `• Estas são apenas previsões baseadas em probabilidades\n\n`;
+    message += `🔴 Lives: o bot monitoriza jogos em tempo real e envia alertas quentes via fluxo <i>live-betting</i>.\n`;
     message += `⚽ Boa sorte com as suas apostas!\n`;
     message += `🤖 Bot de Previsões Futebol`;
 
@@ -205,6 +260,7 @@ const sendPredictionsStep = createStep({
         totalMatches: originalData.totalMatches,
         analyzedMatches: analysis.totalAnalyzed,
         highConfidenceMatches: analysis.highConfidenceCount,
+        regionBreakdown: analysis.breakdownByRegion,
       },
     };
   },

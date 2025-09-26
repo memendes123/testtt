@@ -2,6 +2,8 @@ import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
 
+import { identifyCompetition, isCompetitionSupported, REGION_LABEL, REGION_ORDER } from "../constants/competitions";
+
 const fetchFootballMatchesFromAPI = async ({
   date,
   logger,
@@ -17,14 +19,10 @@ const fetchFootballMatchesFromAPI = async ({
   }
 
   try {
-    // European leagues (Premier League, La Liga, Bundesliga, Serie A, Ligue 1, etc.)
-    const europeanLeagues = [39, 140, 78, 135, 61, 2, 3, 88, 94, 203]; // Top European leagues
-    
-    logger?.info("📝 [FetchFootballMatches] Fetching matches for European leagues", { leagues: europeanLeagues });
+    logger?.info("📝 [FetchFootballMatches] Fetching fixtures for supported competitions", { date });
 
-    // Fetch fixtures for today
     const fixturesResponse = await fetch(
-      `https://v3.football.api-sports.io/fixtures?date=${date}&league=${europeanLeagues.join(',')}&status=NS`,
+      `https://v3.football.api-sports.io/fixtures?date=${date}&status=NS`,
       {
         headers: {
           "X-RapidAPI-Key": apiKey,
@@ -38,19 +36,59 @@ const fetchFootballMatchesFromAPI = async ({
     }
 
     const fixturesData = await fixturesResponse.json();
-    logger?.info("📝 [FetchFootballMatches] Received fixtures data", { 
-      matchCount: fixturesData.response?.length || 0 
+    const totalFixtures = fixturesData.response?.length || 0;
+    logger?.info("📝 [FetchFootballMatches] Received fixtures data", {
+      totalFixtures,
     });
 
-    const matches = [];
+    const supportedFixtures = (fixturesData.response || []).filter((fixture: any) => {
+      if (!isCompetitionSupported(fixture.league)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    logger?.info("📝 [FetchFootballMatches] Filtered fixtures for supported competitions", {
+      totalSupported: supportedFixtures.length,
+    });
+
+    const MAX_FIXTURES_TO_PROCESS = 120;
+    const fixturesToProcess = supportedFixtures
+      .sort((a: any, b: any) => (a.fixture.timestamp || 0) - (b.fixture.timestamp || 0))
+      .slice(0, MAX_FIXTURES_TO_PROCESS);
+
+    if (supportedFixtures.length > MAX_FIXTURES_TO_PROCESS) {
+      logger?.warn("📝 [FetchFootballMatches] Limiting fixtures due to processing cap", {
+        cap: MAX_FIXTURES_TO_PROCESS,
+        skipped: supportedFixtures.length - MAX_FIXTURES_TO_PROCESS,
+      });
+    }
+
+    const matches: any[] = [];
+
+    const regionCounters: Record<string, { total: number }> = {};
+    REGION_ORDER.forEach((region) => {
+      regionCounters[region] = { total: 0 };
+    });
 
     // Process each match and fetch odds
-    for (const fixture of fixturesData.response || []) {
+    for (const fixture of fixturesToProcess) {
       try {
-        logger?.info("📝 [FetchFootballMatches] Processing match", { 
-          homeTeam: fixture.teams.home.name, 
-          awayTeam: fixture.teams.away.name 
+        logger?.info("📝 [FetchFootballMatches] Processing match", {
+          homeTeam: fixture.teams.home.name,
+          awayTeam: fixture.teams.away.name
         });
+
+        const competition = identifyCompetition(fixture.league);
+        if (!competition) {
+          logger?.warn("📝 [FetchFootballMatches] Competition not supported after filtering", {
+            leagueName: fixture.league?.name,
+            leagueId: fixture.league?.id,
+            country: fixture.league?.country,
+          });
+          continue;
+        }
 
         // Fetch odds for this specific match
         const oddsResponse = await fetch(
@@ -83,14 +121,21 @@ const fetchFootballMatchesFromAPI = async ({
         matches.push({
           fixtureId: fixture.fixture.id,
           date: fixture.fixture.date,
-          time: new Date(fixture.fixture.date).toLocaleTimeString('pt-PT', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+          time: new Date(fixture.fixture.date).toLocaleTimeString('pt-PT', {
+            hour: '2-digit',
+            minute: '2-digit'
           }),
           league: {
             name: fixture.league.name,
             country: fixture.league.country,
             logo: fixture.league.logo,
+          },
+          competition: {
+            key: competition.key,
+            name: competition.displayName,
+            region: competition.region,
+            type: competition.type,
+            country: competition.country,
           },
           teams: {
             home: {
@@ -106,6 +151,8 @@ const fetchFootballMatchesFromAPI = async ({
           odds: odds,
         });
 
+        regionCounters[competition.region].total += 1;
+
         // Add small delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -118,14 +165,29 @@ const fetchFootballMatchesFromAPI = async ({
       }
     }
 
-    logger?.info("✅ [FetchFootballMatches] Completed successfully", { 
-      totalMatches: matches.length 
+    logger?.info("✅ [FetchFootballMatches] Completed successfully", {
+      totalMatches: matches.length,
+      perRegion: REGION_ORDER.map((region) => ({
+        region,
+        label: REGION_LABEL[region],
+        total: regionCounters[region].total,
+      })),
     });
 
     return {
       date,
       totalMatches: matches.length,
-      matches: matches.slice(0, 20), // Limit to top 20 matches to avoid overwhelming
+      matches,
+      metadata: {
+        totalFixtures,
+        supportedFixtures: supportedFixtures.length,
+        processedFixtures: fixturesToProcess.length,
+        perRegion: REGION_ORDER.map((region) => ({
+          region,
+          label: REGION_LABEL[region],
+          total: regionCounters[region].total,
+        })),
+      },
     };
 
   } catch (error) {
@@ -138,7 +200,7 @@ const fetchFootballMatchesFromAPI = async ({
 
 export const fetchFootballMatchesTool = createTool({
   id: "fetch-football-matches",
-  description: "Fetches daily European football matches with odds from API-Football for betting analysis",
+  description: "Fetches daily football fixtures and odds for all supported global competitions",
   inputSchema: z.object({
     date: z.string().describe("Date in YYYY-MM-DD format to fetch matches for"),
   }),
@@ -154,6 +216,13 @@ export const fetchFootballMatchesTool = createTool({
         country: z.string(),
         logo: z.string(),
       }),
+      competition: z.object({
+        key: z.string(),
+        name: z.string(),
+        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        type: z.enum(["league", "cup", "supercup"]),
+        country: z.string(),
+      }),
       teams: z.object({
         home: z.object({
           name: z.string(),
@@ -167,6 +236,18 @@ export const fetchFootballMatchesTool = createTool({
       venue: z.string(),
       odds: z.any().nullable(),
     })),
+    metadata: z.object({
+      totalFixtures: z.number(),
+      supportedFixtures: z.number(),
+      processedFixtures: z.number(),
+      perRegion: z.array(
+        z.object({
+          region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+          label: z.string(),
+          total: z.number(),
+        }),
+      ),
+    }),
   }),
   execute: async ({ context: { date }, mastra }) => {
     const logger = mastra?.getLogger();
