@@ -61,8 +61,9 @@ Além do health-check automático, recomenda-se:
 
 ## 6. Cobertura de competições e APIs grátis
 
-- A tool `fetchFootballMatches` suporta automaticamente as ligas e taças listadas pelo utilizador, distribuídas por Europa, América do Sul, América do Norte, Ásia/Médio Oriente e África. O resumo diário apresenta os totais e destaques por região, garantindo que cada grupo recebe pelo menos três recomendações sempre que existam odds disponíveis.
-- O monitoramento ao vivo (`monitor-live-matches` + `live-betting-workflow`) usa o mesmo filtro de competições, pelo que os alertas consideram campeonatos e taças globais.
+- A tool `fetchFootballMatches` suporta automaticamente as ligas e taças listadas pelo utilizador, agora agrupadas por Europa, América do Sul, América do Norte, Ásia/Médio Oriente, África, competições continentais (UEFA Champions League, Libertadores, Champions Cup, etc.) e torneios mundiais (Mundial, Euro, Copa América, Jogos Olímpicos, Club World Cup). O resumo diário apresenta os totais e destaques por região, garantindo que cada grupo recebe pelo menos três recomendações sempre que existam odds disponíveis.
+- O monitoramento ao vivo (`monitor-live-matches` + `live-betting-workflow`) usa o mesmo filtro de competições, pelo que os alertas consideram campeonatos, torneios continentais e eventos globais sem ajustes adicionais.
+- Como a lista de torneios inclui fases finais com calendários intensivos, confirme se o `FOOTBALL_API_KEY` pertence a um plano com limite diário suficiente ou prepare chaves alternativas para períodos de Mundial, Jogos Olímpicos e outras fases concentradas. Ajuste também o cron ou janelas de execução para abranger partidas em fusos distintos (Ásia/Oceânia) durante esses eventos.
 - Todos os dados provêm do API-Football, que oferece um escalão gratuito suficiente para testes e para uma execução diária. Caso seja necessário reforçar o número de chamadas gratuitas para mercados específicos, prepare chaves adicionais de APIs públicas (por exemplo, API-FOOTBALL free tier adicional, Football-Data.org ou APIs federativas) e partilhe-as para integração futura.
 
 
