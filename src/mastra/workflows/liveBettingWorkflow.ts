@@ -4,12 +4,12 @@ import { RuntimeContext } from "@mastra/core/di";
 
 import { monitorLiveMatchesTool } from "../tools/monitorLiveMatches";
 import { sendTelegramMessageTool } from "../tools/sendTelegramMessage";
-import { REGION_LABEL } from "../constants/competitions";
+import { COMPETITION_REGIONS, REGION_LABEL } from "../constants/competitions";
 
 const runtimeContext = new RuntimeContext();
 
 // Define schemas
-const RegionEnum = z.enum(["Europe", "South America", "North America", "Asia", "Africa"]);
+const RegionEnum = z.enum(COMPETITION_REGIONS);
 
 const LiveMatchData = z.object({
   totalLiveMatches: z.number(),

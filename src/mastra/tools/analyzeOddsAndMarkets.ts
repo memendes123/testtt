@@ -2,7 +2,12 @@ import { createTool } from "@mastra/core/tools";
 import type { IMastraLogger } from "@mastra/core/logger";
 import { z } from "zod";
 
-import { REGION_LABEL, REGION_ORDER } from "../constants/competitions";
+import {
+  COMPETITION_REGIONS,
+  REGION_LABEL,
+  REGION_ORDER,
+} from "../constants/competitions";
+import type { CompetitionRegion } from "../constants/competitions";
 
 type AnalyzedMatch = any & {
   competition?: {
@@ -182,13 +187,23 @@ const analyzeMatchOdds = ({
   });
 
   analyzedMatches.forEach((match) => {
-    const region = match.competition?.region;
-    if (region && regionBuckets[region]) {
-      regionBuckets[region].push(match);
+    const region = match.competition?.region as CompetitionRegion | undefined;
+    if (!region) {
+      return;
     }
+
+    if (!regionBuckets[region]) {
+      regionBuckets[region] = [];
+    }
+
+    regionBuckets[region].push(match);
   });
 
-  const breakdownByRegion = REGION_ORDER.map((region) => {
+  const orderedRegions = Array.from(
+    new Set<CompetitionRegion>([...REGION_ORDER, ...(Object.keys(regionBuckets) as CompetitionRegion[])]),
+  );
+
+  const breakdownByRegion = orderedRegions.map((region) => {
     const matchesForRegion = regionBuckets[region];
     return {
       region,
@@ -199,7 +214,7 @@ const analyzeMatchOdds = ({
     };
   });
 
-  const bestMatchesByRegion = REGION_ORDER.map((region) => {
+  const bestMatchesByRegion = orderedRegions.map((region) => {
     const matchesForRegion = regionBuckets[region];
     const sortedRegionMatches = matchesForRegion.sort((a, b) => computeScore(b) - computeScore(a));
     return {
@@ -237,7 +252,7 @@ export const analyzeOddsAndMarketsTool = createTool({
     mediumConfidenceCount: z.number(),
     breakdownByRegion: z.array(
       z.object({
-        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        region: z.enum(COMPETITION_REGIONS),
         label: z.string(),
         total: z.number(),
         highConfidence: z.number(),
@@ -246,7 +261,7 @@ export const analyzeOddsAndMarketsTool = createTool({
     ),
     bestMatchesByRegion: z.array(
       z.object({
-        region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+        region: z.enum(COMPETITION_REGIONS),
         label: z.string(),
         matches: z.array(z.any()),
       }),

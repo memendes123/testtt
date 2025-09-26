@@ -1,11 +1,16 @@
 import { z } from "zod";
 
-export type CompetitionRegion =
-  | "Europe"
-  | "South America"
-  | "North America"
-  | "Asia"
-  | "Africa";
+export const COMPETITION_REGIONS = [
+  "Europe",
+  "South America",
+  "North America",
+  "Asia",
+  "Africa",
+  "International",
+  "Intercontinental",
+] as const;
+
+export type CompetitionRegion = (typeof COMPETITION_REGIONS)[number];
 
 export type CompetitionType = "league" | "cup" | "supercup";
 
@@ -22,7 +27,7 @@ export interface CompetitionMetadata {
 export const competitionMetadataSchema = z.object({
   key: z.string(),
   displayName: z.string(),
-  region: z.enum(["Europe", "South America", "North America", "Asia", "Africa"]),
+  region: z.enum(COMPETITION_REGIONS),
   type: z.enum(["league", "cup", "supercup"]),
   country: z.string(),
   aliases: z.array(z.string()).optional(),
@@ -628,6 +633,213 @@ export const SUPPORTED_COMPETITIONS: CompetitionMetadata[] = [
     type: "cup",
     country: "Algeria",
   },
+
+  // International Club Competitions
+  {
+    key: "uefa-champions-league",
+    displayName: "UEFA Champions League",
+    region: "International",
+    type: "cup",
+    country: "UEFA",
+    aliases: [
+      "Champions League",
+      "Liga dos Campeões",
+      "UCL",
+      "World UEFA Champions League",
+    ],
+    apiFootballIds: [2],
+  },
+  {
+    key: "uefa-europa-league",
+    displayName: "UEFA Europa League",
+    region: "International",
+    type: "cup",
+    country: "UEFA",
+    aliases: ["Europa League", "Liga Europa", "UEL", "World UEFA Europa League"],
+    apiFootballIds: [3],
+  },
+  {
+    key: "uefa-europa-conference-league",
+    displayName: "UEFA Europa Conference League",
+    region: "International",
+    type: "cup",
+    country: "UEFA",
+    aliases: [
+      "Europa Conference League",
+      "Liga Conferência",
+      "UECL",
+      "World UEFA Conference League",
+    ],
+    apiFootballIds: [848],
+  },
+  {
+    key: "uefa-super-cup",
+    displayName: "UEFA Super Cup",
+    region: "International",
+    type: "supercup",
+    country: "UEFA",
+    aliases: ["Supertaça Europeia", "European Super Cup", "UEFA Supercup"],
+    apiFootballIds: [528],
+  },
+  {
+    key: "copa-libertadores",
+    displayName: "Copa Libertadores",
+    region: "International",
+    type: "cup",
+    country: "CONMEBOL",
+    aliases: ["CONMEBOL Libertadores", "Libertadores", "Taça Libertadores"],
+    apiFootballIds: [13],
+  },
+  {
+    key: "copa-sudamericana",
+    displayName: "Copa Sudamericana",
+    region: "International",
+    type: "cup",
+    country: "CONMEBOL",
+    aliases: ["CONMEBOL Sudamericana", "Sudamericana", "Copa Sul-Americana"],
+    apiFootballIds: [44],
+  },
+  {
+    key: "recopa-sudamericana",
+    displayName: "Recopa Sudamericana",
+    region: "International",
+    type: "supercup",
+    country: "CONMEBOL",
+    aliases: ["CONMEBOL Recopa", "Recopa", "Supercopa CONMEBOL"],
+    apiFootballIds: [215],
+  },
+  {
+    key: "concacaf-champions-cup",
+    displayName: "CONCACAF Champions Cup",
+    region: "International",
+    type: "cup",
+    country: "CONCACAF",
+    aliases: [
+      "CONCACAF Champions League",
+      "Liga dos Campeões CONCACAF",
+      "CCL",
+    ],
+    apiFootballIds: [32],
+  },
+  {
+    key: "leagues-cup",
+    displayName: "Leagues Cup",
+    region: "International",
+    type: "cup",
+    country: "CONCACAF",
+    aliases: ["Leagues Cup MLS", "Copa das Ligas", "MLS vs Liga MX"],
+    apiFootballIds: [719],
+  },
+  {
+    key: "afc-champions-league",
+    displayName: "AFC Champions League",
+    region: "International",
+    type: "cup",
+    country: "AFC",
+    aliases: ["Liga dos Campeões da AFC", "Asian Champions League", "ACL"],
+    apiFootballIds: [17],
+  },
+  {
+    key: "afc-cup",
+    displayName: "AFC Cup",
+    region: "International",
+    type: "cup",
+    country: "AFC",
+    aliases: ["Taça AFC", "AFC Cup", "Copa AFC"],
+    apiFootballIds: [18],
+  },
+  {
+    key: "caf-champions-league",
+    displayName: "CAF Champions League",
+    region: "International",
+    type: "cup",
+    country: "CAF",
+    aliases: ["Liga dos Campeões CAF", "African Champions League", "CAF CL"],
+    apiFootballIds: [10],
+  },
+  {
+    key: "caf-confederation-cup",
+    displayName: "CAF Confederation Cup",
+    region: "International",
+    type: "cup",
+    country: "CAF",
+    aliases: ["Taça das Confederações CAF", "CAF CC", "African Confederation Cup"],
+    apiFootballIds: [11],
+  },
+  {
+    key: "fifa-club-world-cup",
+    displayName: "FIFA Club World Cup",
+    region: "Intercontinental",
+    type: "cup",
+    country: "FIFA",
+    aliases: ["Mundial de Clubes", "Club World Cup", "FIFA CWC"],
+    apiFootballIds: [8],
+  },
+
+  // International & National Team Tournaments
+  {
+    key: "fifa-world-cup",
+    displayName: "FIFA World Cup",
+    region: "Intercontinental",
+    type: "cup",
+    country: "FIFA",
+    aliases: ["World Cup", "Mundial", "Copa do Mundo"],
+    apiFootballIds: [1],
+  },
+  {
+    key: "copa-america",
+    displayName: "Copa América",
+    region: "International",
+    type: "cup",
+    country: "CONMEBOL",
+    aliases: ["Copa America", "CONMEBOL Copa América", "Copa América de Seleções"],
+    apiFootballIds: [6],
+  },
+  {
+    key: "uefa-euro",
+    displayName: "UEFA Euro",
+    region: "International",
+    type: "cup",
+    country: "UEFA",
+    aliases: ["Euro", "European Championship", "Eurocopa"],
+    apiFootballIds: [4],
+  },
+  {
+    key: "africa-cup-of-nations",
+    displayName: "Africa Cup of Nations",
+    region: "International",
+    type: "cup",
+    country: "CAF",
+    aliases: ["Copa Africana de Nações", "CAN", "AFCON"],
+    apiFootballIds: [7],
+  },
+  {
+    key: "afc-asian-cup",
+    displayName: "AFC Asian Cup",
+    region: "International",
+    type: "cup",
+    country: "AFC",
+    aliases: ["Taça Asiática", "Asian Cup", "Copa da Ásia"],
+    apiFootballIds: [34],
+  },
+  {
+    key: "concacaf-gold-cup",
+    displayName: "CONCACAF Gold Cup",
+    region: "International",
+    type: "cup",
+    country: "CONCACAF",
+    aliases: ["Gold Cup", "Taça Ouro", "Copa Ouro"],
+    apiFootballIds: [24],
+  },
+  {
+    key: "olympic-games-football",
+    displayName: "Olympic Football Tournament",
+    region: "Intercontinental",
+    type: "cup",
+    country: "IOC",
+    aliases: ["Jogos Olímpicos", "Olympics Football", "Torneio Olímpico"],
+    apiFootballIds: [679],
+  },
 ];
 
 const normalizedCompetitions: NormalizedCompetition[] = SUPPORTED_COMPETITIONS.map(buildNormalizedCompetition);
@@ -643,6 +855,8 @@ export const REGION_ORDER: CompetitionRegion[] = [
   "North America",
   "Asia",
   "Africa",
+  "International",
+  "Intercontinental",
 ];
 
 export const REGION_LABEL: Record<CompetitionRegion, string> = {
@@ -651,6 +865,8 @@ export const REGION_LABEL: Record<CompetitionRegion, string> = {
   "North America": "América do Norte",
   Asia: "Ásia & Médio Oriente",
   Africa: "África",
+  International: "Competições Continentais",
+  Intercontinental: "Competições Mundiais",
 };
 
 export const identifyCompetition = (
