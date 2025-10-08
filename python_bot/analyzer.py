@@ -268,6 +268,7 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
         if forebet_used:
             notes.append("Probabilidades 1X2 complementadas com dados da Forebet")
 
+
         draw_rate = (
             float(home_form.get("drawRate", 0.0)) if isinstance(home_form, dict) else 0.0
         ) + (

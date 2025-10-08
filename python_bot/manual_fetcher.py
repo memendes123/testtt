@@ -129,6 +129,7 @@ def _fetch_odds(fixture_id: int, settings: Settings, logger: logging.Logger) -> 
         response = requests.get(
             f"{API_BASE}/odds",
             params={"fixture": fixture_id},
+            params={"fixture": fixture_id, "bookmaker": settings.bookmaker_id},
             headers=_headers(settings),
             timeout=30,
         )
@@ -150,6 +151,7 @@ def _fetch_odds(fixture_id: int, settings: Settings, logger: logging.Logger) -> 
                     seen_markets[name] = bet.get("values") or []
 
         return [{"name": market, "values": values} for market, values in seen_markets.items()]
+        return payload["response"][0]["bookmakers"][0]["bets"]
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Não foi possível obter odds para o fixture",

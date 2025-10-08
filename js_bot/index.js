@@ -500,6 +500,7 @@ async function fetchMatches(date, settings, logger) {
     const forebetKey = buildForebetKey(fixture.teams?.home?.name, fixture.teams?.away?.name);
     const forebet = forebetKey ? forebetPredictions.get(forebetKey) ?? null : null;
 
+
     let time = '';
     if (fixture.fixture?.date) {
       try {
@@ -528,6 +529,7 @@ async function fetchMatches(date, settings, logger) {
       venue: fixture.fixture?.venue?.name ?? 'TBD',
       odds,
       forebet,
+
       form: {
         home: homeForm,
         away: awayForm,
@@ -690,6 +692,22 @@ function analyzeMatches(matches, logger) {
       applyForebet('under25Probability', 'under25Probability');
       applyForebet('bttsYesProbability', 'bttsYesProbability');
       applyForebet('bttsNoProbability', 'bttsNoProbability');
+    for (const value of markets.get('Match Winner') || []) {
+      const normalized = normalizeMarketValue(value.value);
+      if (HOME_LABELS.has(normalized)) entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
+      if (DRAW_LABELS.has(normalized)) entry.predictions.drawProbability = probabilityFromOdd(value.odd);
+      if (AWAY_LABELS.has(normalized)) entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
+    }
+
+    for (const value of markets.get('Goals Over/Under') || []) {
+      if (isOver25Label(value.value)) entry.predictions.over25Probability = probabilityFromOdd(value.odd);
+      if (isUnder25Label(value.value)) entry.predictions.under25Probability = probabilityFromOdd(value.odd);
+    }
+
+    for (const value of markets.get('Both Teams Score') || []) {
+      const normalized = normalizeMarketValue(value.value);
+      if (YES_LABELS.has(normalized)) entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
+      if (NO_LABELS.has(normalized)) entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
     }
 
     const recommendations = [];

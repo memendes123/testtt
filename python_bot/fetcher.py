@@ -259,6 +259,7 @@ def fetch_matches(
     head_to_head_cache: Dict[Tuple[int, int], Optional[Dict[str, object]]] = {}
     forebet_client = ForebetClient(logger=logger)
 
+
     def get_team_form(team_id: Optional[int]) -> Optional[Dict[str, object]]:
         if not team_id:
             return None
@@ -421,6 +422,7 @@ def fetch_matches(
             "venue": fixture_info.get("venue", {}).get("name") or "TBD",
             "odds": odds_data,
             "forebet": forebet_data,
+
             "form": {
                 "home": home_form,
                 "away": away_form,
