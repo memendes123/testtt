@@ -481,22 +481,36 @@ function parseArgs() {
     verbose: false,
   };
 
+  const requireValue = (flag, value) => {
+    if (value === undefined) {
+      throw new Error(`Missing value for ${flag}`);
+    }
+    return value;
+  };
+
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
-    if (arg === '--date') {
-      parsed.date = args[++i];
-    } else if (arg === '--env') {
-      parsed.env = args[++i];
-    } else if (arg === '--dry-run') {
-      parsed.dryRun = true;
-      i -= 1;
-    } else if (arg === '--chat-id') {
-      parsed.chatId = args[++i];
-    } else if (arg === '--output') {
-      parsed.output = args[++i];
-    } else if (arg === '--verbose') {
-      parsed.verbose = true;
-      i -= 1;
+    switch (arg) {
+      case '--date':
+        parsed.date = requireValue('--date', args[++i]);
+        break;
+      case '--env':
+        parsed.env = requireValue('--env', args[++i]);
+        break;
+      case '--dry-run':
+        parsed.dryRun = true;
+        break;
+      case '--chat-id':
+        parsed.chatId = requireValue('--chat-id', args[++i]);
+        break;
+      case '--output':
+        parsed.output = requireValue('--output', args[++i]);
+        break;
+      case '--verbose':
+        parsed.verbose = true;
+        break;
+      default:
+        break;
     }
   }
 
@@ -522,7 +536,13 @@ function createLogger(verbose) {
 }
 
 async function main() {
-  const args = parseArgs();
+  let args;
+  try {
+    args = parseArgs();
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
   loadEnv(args.env);
   const logger = createLogger(args.verbose);
 
