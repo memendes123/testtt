@@ -1,9 +1,48 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from typing import Dict, List, Optional
 
 from .competitions import CompetitionIndex
+
+
+HOME_LABELS = {"home", "1", "home team", "team 1", "1 home"}
+DRAW_LABELS = {"draw", "x", "empate"}
+AWAY_LABELS = {"away", "2", "away team", "team 2", "2 away"}
+YES_LABELS = {"yes", "sim", "y", "s"}
+NO_LABELS = {"no", "nao", "n"}
+
+
+def _normalize_label(value: Optional[object]) -> str:
+    if value is None:
+        return ""
+
+    text = str(value)
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.replace(",", ".").replace("(", " ").replace(")", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip().lower()
+
+
+def _is_over_25_label(value: Optional[object]) -> bool:
+    normalized = _normalize_label(value)
+    if not normalized:
+        return False
+    if "over" in normalized or "mais de" in normalized:
+        return "2.5" in normalized or "25" in normalized
+    return False
+
+
+def _is_under_25_label(value: Optional[object]) -> bool:
+    normalized = _normalize_label(value)
+    if not normalized:
+        return False
+    if "under" in normalized or "menos de" in normalized:
+        return "2.5" in normalized or "25" in normalized
+    return False
 
 
 def _calculate_probability(odd: Optional[str]) -> int:
@@ -54,29 +93,29 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
         predictions = entry["predictions"]
 
         for value in match_winner:
-            label = value.get("value")
+            label = _normalize_label(value.get("value"))
             odd = value.get("odd")
-            if label == "Home":
+            if label in HOME_LABELS:
                 predictions["homeWinProbability"] = _calculate_probability(odd)
-            elif label == "Draw":
+            elif label in DRAW_LABELS:
                 predictions["drawProbability"] = _calculate_probability(odd)
-            elif label == "Away":
+            elif label in AWAY_LABELS:
                 predictions["awayWinProbability"] = _calculate_probability(odd)
 
         for value in over_under:
             label = value.get("value")
             odd = value.get("odd")
-            if label == "Over 2.5":
+            if _is_over_25_label(label):
                 predictions["over25Probability"] = _calculate_probability(odd)
-            elif label == "Under 2.5":
+            elif _is_under_25_label(label):
                 predictions["under25Probability"] = _calculate_probability(odd)
 
         for value in btts:
-            label = value.get("value")
+            label = _normalize_label(value.get("value"))
             odd = value.get("odd")
-            if label == "Yes":
+            if label in YES_LABELS:
                 predictions["bttsYesProbability"] = _calculate_probability(odd)
-            elif label == "No":
+            elif label in NO_LABELS:
                 predictions["bttsNoProbability"] = _calculate_probability(odd)
 
         recommendations: List[str] = []
