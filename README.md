@@ -21,6 +21,9 @@ Este repositório contém duas portas independentes (Python e Node.js) do fluxo 
 | `TELEGRAM_CHANNEL_ID` | ⚪️ | Canal público (ex.: `@meucanal`) caso queira publicar automaticamente. |
 | `FOOTBALL_API_BOOKMAKER` | ⚪️ | ID do bookmaker desejado (padrão `6` – Pinnacle). |
 | `FOOTBALL_MAX_FIXTURES` | ⚪️ | Limite de jogos carregados por execução (padrão `120`). |
+| `TELEGRAM_OWNER_ID` | ⚪️ | ID numérico da conta que poderá usar o comando exclusivo `/insight`. |
+| `OPENAI_API_KEY` | ⚪️ | Chave da OpenAI para gerar resumos via ChatGPT (opcional). |
+| `OPENAI_MODEL` | ⚪️ | Modelo da OpenAI a utilizar (padrão `gpt-4o-mini`). |
 
 ### Guardando os segredos com segurança
 
@@ -81,6 +84,26 @@ FOOTBALL_MAX_FIXTURES=120
 
 > Ambas as versões aceitam `--date YYYY-MM-DD` para backfill e `--output arquivo.json` para salvar o payload completo.
 
+### Comando privado com ChatGPT (owner)
+
+Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
+
+1. Defina no `.env`:
+   ```env
+   TELEGRAM_OWNER_ID=123456789
+   OPENAI_API_KEY=sk-...
+   ```
+   (o `OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado).
+2. Inicie o listener dedicado:
+   ```bash
+   python -m python_bot.owner_command --env .env
+   ```
+3. No chat privado com o bot, envie comandos como:
+   * `/insight city` → procura o próximo jogo do Manchester City e gera análise completa.
+   * `/insight city-psg` → foca no confronto directo entre City e PSG.
+
+O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Apenas o `TELEGRAM_OWNER_ID` configurado pode usar este comando; pedidos de outros utilizadores são recusados automaticamente.
+
 ---
 
 ## 3. Deixando online 24/7 na sua máquina
@@ -122,6 +145,8 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 ## 5. Como a análise funciona
 
 * **Conversão de odds em probabilidade:** cada odd decimal é convertida em percentual (`100 / odd`).
+* **Form vs. histórico:** quando uma casa de apostas não oferece odds para 1X2, usamos o desempenho recente (últimos 5 jogos) e o confronto direto para estimar probabilidades, evitando relatórios zerados.
+* **Notas chave (PK):** para cada destaque são listados até 2 “pontos-chave” baseados na forma das equipas (sequência de vitórias/derrotas, média de golos, confrontos diretos).
 * **Classificação de confiança:** partidas com probabilidades altas geram recomendações "Forte favorito" ou "Favorito". Mercados Over/Under e Ambos Marcam entram na lista caso ultrapassem 60%.
 * **Pontuação e ordenação:** os jogos são reordenados por confiança e quantidade de recomendações, exibindo os melhores primeiro e organizando por região/competição.
 * **Resumo agregado:** o relatório mostra quantos jogos de alta ou média confiança existem por região, ajudando a priorizar ligas.
@@ -139,5 +164,44 @@ Para ver a lógica exata consulte:
 * Ajuste a lista de competições em `shared/competitions.json` para focar apenas nos campeonatos desejados.
 * Ajuste os thresholds de confiança no `analyzer.py` caso queira alertas mais conservadores ou agressivos.
 * Integre com outras saídas (Discord, e-mail) reutilizando a função `message_builder.build_message`.
+
+---
+
+## 7. Gerindo jobs agendados (cron/PM2)
+
+Quando precisar parar o bot para aplicar atualizações ou trocar credenciais, basta seguir os passos abaixo conforme a ferramenta usada:
+
+### Cron (Linux/macOS)
+
+1. **Listar o agendamento atual:**
+   ```bash
+   crontab -l
+   ```
+2. **Editar/pausar temporariamente:** comente a linha do bot adicionando `#` no início.
+   ```bash
+   crontab -e
+   # 0 9 * * * /caminho/para/.venv/bin/python -m python_bot.main --env /caminho/.env
+   ```
+3. **Aplicar a atualização (pull/commit/etc.)**
+4. **Reativar:** remova o `#` e salve novamente com `crontab -e`.
+
+### PM2 (Node.js)
+
+```bash
+# Parar o processo
+npx pm2 stop futebol-bot
+
+# Aplicar atualizações no código
+git pull
+npm install
+
+# Subir novamente (ajuste o comando conforme seu fluxo)
+npx pm2 start "node js_bot/index.js --env /caminho/.env" --name futebol-bot --cron "0 9 * * *"
+
+# Verificar status
+npx pm2 status futebol-bot
+```
+
+Para remover definitivamente um job agendado, use `crontab -e` (removendo a linha) ou `npx pm2 delete futebol-bot`. Depois de reinstalar dependências ou atualizar o código, execute os comandos de start novamente.
 
 Com esse guia você consegue hospedar o bot no seu PC, VPS ou Replit, mantendo as credenciais seguras e garantindo execuções automáticas confiáveis.
