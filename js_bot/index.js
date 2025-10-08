@@ -878,13 +878,15 @@ function analyzeMatches(matches, logger) {
     return {
       region,
       label: competitionData.regionLabel[region] || region,
-      matches: ordered.slice(0, 5),
+      matches: ordered,
+      topMatches: ordered.slice(0, 5),
     };
   });
 
   return {
     totalAnalyzed: analyzed.length,
     bestMatches: sorted.slice(0, 10),
+    allMatches: sorted,
     highConfidenceCount: sorted.filter((match) => match.confidence === 'high').length,
     mediumConfidenceCount: sorted.filter((match) => match.confidence === 'medium').length,
     breakdownByRegion: breakdown,
@@ -892,56 +894,117 @@ function analyzeMatches(matches, logger) {
   };
 }
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function confidenceLabel(confidence) {
+  if (confidence === 'high') return '🔥 Alta';
+  if (confidence === 'medium') return '⚡ Média';
+  if (confidence === 'low') return '💡 Baixa';
+  return confidence ? escapeHtml(confidence) : null;
+}
+
+function formatProbabilityLines(predictions = {}) {
+  const lines = [];
+  const home = Number(predictions.homeWinProbability || 0);
+  const draw = Number(predictions.drawProbability || 0);
+  const away = Number(predictions.awayWinProbability || 0);
+  if (home || draw || away) {
+    lines.push(`↳ 📈 1X2: Casa ${home}% | Empate ${draw}% | Fora ${away}%`);
+  }
+
+  const over25 = Number(predictions.over25Probability || 0);
+  const under25 = Number(predictions.under25Probability || 0);
+  if (over25 || under25) {
+    lines.push(`↳ ⚽ Linhas 2.5: Over ${over25}% | Under ${under25}%`);
+  }
+
+  const bttsYes = Number(predictions.bttsYesProbability || 0);
+  const bttsNo = Number(predictions.bttsNoProbability || 0);
+  if (bttsYes || bttsNo) {
+    lines.push(`↳ 🤝 Ambos marcam: Sim ${bttsYes}% | Não ${bttsNo}%`);
+  }
+
+  return lines;
+}
+
+function escapeJoin(values = [], separator = ' | ') {
+  return values.filter((value) => value !== undefined && value !== null).map((value) => escapeHtml(value)).join(separator);
+}
+
+function formatMatchDetails(match, prefix) {
+  const teams = match.teams || {};
+  const home = escapeHtml(teams.home?.name || 'Casa');
+  const away = escapeHtml(teams.away?.name || 'Fora');
+  const competition = match.competition || {};
+  const league = competition.name || match.league?.name || '';
+  const timeLabel = match.time ? `(${escapeHtml(match.time)})` : '';
+
+  const headerParts = [prefix, `<b>${home} vs ${away}</b>`, timeLabel, league ? `— ${escapeHtml(league)}` : '']
+    .filter(Boolean)
+    .join(' ');
+
+  const lines = [headerParts];
+
+  const confidence = confidenceLabel(match.confidence);
+  if (confidence) {
+    lines.push(`↳ Confiança: ${confidence}`);
+  }
+
+  if (match.recommendedBets?.length) {
+    lines.push(`↳ 🎯 ${escapeJoin(match.recommendedBets)}`);
+  }
+
+  lines.push(...formatProbabilityLines(match.predictions));
+
+  if (match.analysisNotes?.length) {
+    lines.push(`↳ 📝 ${escapeJoin(match.analysisNotes.slice(0, 2), ' • ')}`);
+  }
+
+  return lines;
+}
+
 function buildMessage(matchData, analysis) {
   const date = new Date(matchData.date);
   const formatted = date.toLocaleDateString('pt-PT', {
-    weekday: 'long',
     year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
   });
 
   const lines = [];
-  lines.push(`🏆 <b>PREVISÕES FUTEBOL - ${formatted.toUpperCase()}</b>`);
+  lines.push(`🏆 <b>PREVISÕES FUTEBOL - ${formatted}</b>`);
   lines.push('');
   lines.push('📊 <b>Resumo Global:</b>');
   lines.push(`• ${matchData.totalMatches} jogos elegíveis nas competições suportadas`);
   lines.push(`• ${analysis.totalAnalyzed} jogos com odds válidas analisados`);
-  lines.push(
-    `• ${analysis.highConfidenceCount} jogos de alta confiança | ${analysis.mediumConfidenceCount} de média confiança`,
-  );
+  lines.push(`• ${analysis.highConfidenceCount} jogos de alta confiança | ${analysis.mediumConfidenceCount} de média confiança`);
   lines.push('');
 
-  const activeRegions = analysis.breakdownByRegion.filter((region) => region.total > 0);
+  const activeRegions = (analysis.breakdownByRegion || []).filter((region) => region.total > 0);
   if (activeRegions.length) {
     lines.push('🌍 <b>Distribuição por Região:</b>');
     for (const region of activeRegions) {
-      lines.push(`• ${region.label}: ${region.total} jogos (${region.highConfidence} alta | ${region.mediumConfidence} média)`);
+      const label = escapeHtml(region.label || region.region || '');
+      lines.push(`• ${label}: ${region.total} jogos (${region.highConfidence} alta | ${region.mediumConfidence} média)`);
     }
     lines.push('');
   }
 
-  if (analysis.bestMatches.length) {
-    const highlights = analysis.bestMatches.slice(0, Math.min(5, analysis.bestMatches.length));
+  const bestMatches = analysis.bestMatches || [];
+  if (bestMatches.length) {
+    const highlights = bestMatches.slice(0, Math.min(5, bestMatches.length));
     lines.push(`🔥 <b>TOP GLOBAL (${highlights.length})</b>`);
     for (const match of highlights) {
       const emoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
-      const competition = match.competition?.name || match.league?.name;
-      lines.push(`${emoji} <b>${match.teams?.home?.name} vs ${match.teams?.away?.name}</b> — ${competition}`);
+      const formattedLines = formatMatchDetails(match, emoji);
       if (match.time) {
-        lines.push(`⏰ ${match.time} | 🏆 ${match.league?.name}`);
+        const league = match.competition?.name || match.league?.name || 'Horário a definir';
+        formattedLines.splice(1, 0, `↳ ⏰ ${escapeHtml(match.time)} | 🏆 ${escapeHtml(league)}`);
       }
-      if (match.recommendedBets?.length) {
-        lines.push(`🎯 ${match.recommendedBets.join(' | ')}`);
-      }
-      const predictions = match.predictions || {};
-      lines.push(
-        `📈 Prob: Casa ${predictions.homeWinProbability}% | Empate ${predictions.drawProbability}% | Fora ${predictions.awayWinProbability}%`,
-      );
-      if (match.analysisNotes?.length) {
-        lines.push(`📝 PK: ${match.analysisNotes.slice(0, 2).join(' • ')}`);
-      }
-      lines.push('');
+      lines.push(...formattedLines, '');
     }
   } else {
     lines.push('😔 <b>Não há jogos com odds interessantes hoje.</b>');
@@ -949,6 +1012,35 @@ function buildMessage(matchData, analysis) {
     lines.push('');
     lines.push('📈 Tip: Verifique os jogos ao vivo durante o dia para oportunidades em tempo real.');
   }
+
+  const regions = analysis.bestMatchesByRegion || [];
+  const sections = regions.filter((region) => (region.matches || []).length);
+  if (sections.length) {
+    lines.push('🗺️ <b>Lista completa por região/competição:</b>');
+    for (const region of sections) {
+      const label = escapeHtml(region.label || region.region || '');
+      lines.push(`📍 <b>${label}</b>`);
+      for (const match of region.matches) {
+        const formattedLines = formatMatchDetails(match, '•');
+        lines.push(...formattedLines, '');
+      }
+    }
+    if (lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+  }
+
+  lines.push(
+    '',
+    '💡 <b>Lembre-se:</b>',
+    '• Aposte com responsabilidade',
+    '• Nunca aposte mais do que pode perder',
+    '• Estas são apenas previsões baseadas em probabilidades',
+    '',
+    '🔴 Lives: o bot monitoriza jogos em tempo real e envia alertas quentes via fluxo <i>live-betting</i>.',
+    '⚽ Boa sorte com as suas apostas!',
+    '🤖 Bot de Previsões Futebol',
+  );
 
   return lines.join('\n');
 }

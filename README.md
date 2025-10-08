@@ -65,6 +65,13 @@ FOOTBALL_MAX_FIXTURES=120
 4. **Executar diariamente automaticamente:** use um agendador do sistema:
    * **Linux/macOS:** `crontab -e` → `0 9 * * * /caminho/para/.venv/bin/python -m python_bot.main --env /caminho/para/.env`
    * **Windows:** Agendador de Tarefas apontando para `python.exe -m python_bot.main --env C:\caminho\.env`
+   * Alternativa embutida: `python -m python_bot.scheduler --env .env --time 00:10 --timezone Europe/Lisbon`
+
+5. **Alertas em jogos ao vivo:**
+   ```bash
+   python -m python_bot.live_monitor --env .env --interval 180 --min-confidence medium
+   ```
+   O monitor envia apenas novas recomendações ou elevações de confiança para evitar alertas repetidos.
 
 ### Node.js
 
