@@ -276,9 +276,9 @@ const analyzeMatchOdds = ({
         const drawOdd = parseFloat(drawEntry?.odd ?? "0");
         const awayOdd = parseFloat(awayEntry?.odd ?? "0");
 
-        if (homeOdd > 0) analysis.predictions.homeWinProbability = Math.round((1 / homeOdd) * 100);
-        if (drawOdd > 0) analysis.predictions.drawProbability = Math.round((1 / drawOdd) * 100);
-        if (awayOdd > 0) analysis.predictions.awayWinProbability = Math.round((1 / awayOdd) * 100);
+        if (homeOdd && homeOdd > 0) analysis.predictions.homeWinProbability = Math.round((1 / homeOdd) * 100);
+        if (drawOdd && drawOdd > 0) analysis.predictions.drawProbability = Math.round((1 / drawOdd) * 100);
+        if (awayOdd && awayOdd > 0) analysis.predictions.awayWinProbability = Math.round((1 / awayOdd) * 100);
 
         logger?.info("📝 [AnalyzeOddsAndMarkets] 1X2 probabilities calculated", {
           home: analysis.predictions.homeWinProbability,
@@ -298,8 +298,12 @@ const analyzeMatchOdds = ({
         const over25Odd = parseFloat(overEntry?.odd ?? "0");
         const under25Odd = parseFloat(underEntry?.odd ?? "0");
 
-        if (over25Odd > 0) analysis.predictions.over25Probability = Math.round((1 / over25Odd) * 100);
-        if (under25Odd > 0) analysis.predictions.under25Probability = Math.round((1 / under25Odd) * 100);
+        const over25Odd = normalizeOdd(overEntry?.odd ?? null);
+        const under25Odd = normalizeOdd(underEntry?.odd ?? null);
+
+        if (over25Odd && over25Odd > 0) analysis.predictions.over25Probability = Math.round((1 / over25Odd) * 100);
+        if (under25Odd && under25Odd > 0)
+          analysis.predictions.under25Probability = Math.round((1 / under25Odd) * 100);
 
         logger?.info("📝 [AnalyzeOddsAndMarkets] Over/Under 2.5 probabilities calculated", {
           over25: analysis.predictions.over25Probability,
@@ -318,8 +322,10 @@ const analyzeMatchOdds = ({
         const bttsYesOdd = parseFloat(yesEntry?.odd ?? "0");
         const bttsNoOdd = parseFloat(noEntry?.odd ?? "0");
 
-        if (bttsYesOdd > 0) analysis.predictions.bttsYesProbability = Math.round((1 / bttsYesOdd) * 100);
-        if (bttsNoOdd > 0) analysis.predictions.bttsNoProbability = Math.round((1 / bttsNoOdd) * 100);
+        if (bttsYesOdd && bttsYesOdd > 0)
+          analysis.predictions.bttsYesProbability = Math.round((1 / bttsYesOdd) * 100);
+        if (bttsNoOdd && bttsNoOdd > 0)
+          analysis.predictions.bttsNoProbability = Math.round((1 / bttsNoOdd) * 100);
 
         logger?.info("📝 [AnalyzeOddsAndMarkets] BTTS probabilities calculated", {
           bttsYes: analysis.predictions.bttsYesProbability,

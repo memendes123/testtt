@@ -85,9 +85,41 @@ def _calculate_probability(odd: Optional[str]) -> int:
         return 0
     try:
         value = float(odd)
-    except (TypeError, ValueError):
-        return 0
-    if value <= 0:
+        return value if value > 0 else None
+
+    text = str(odd).strip().lower()
+    if not text:
+        return None
+
+    # Support fractional odds such as "3/2".
+    if "/" in text:
+        parts = text.split("/")
+        if len(parts) == 2:
+            try:
+                numerator = float(parts[0].strip().replace(",", "."))
+                denominator = float(parts[1].strip().replace(",", "."))
+                if denominator > 0:
+                    decimal_value = 1 + (numerator / denominator)
+                    return decimal_value if decimal_value > 0 else None
+            except ValueError:
+                return None
+
+    cleaned = text.replace(",", ".")
+    match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    if not match:
+        return None
+
+    try:
+        value = float(match.group(0))
+    except ValueError:
+        return None
+
+    return value if value > 0 else None
+
+
+def _calculate_probability(odd: Optional[object]) -> int:
+    value = _normalize_odd_value(odd)
+    if value is None or value <= 0:
         return 0
     return round((1 / value) * 100)
 

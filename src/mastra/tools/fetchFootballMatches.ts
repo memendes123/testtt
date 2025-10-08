@@ -229,6 +229,7 @@ const fetchFootballMatchesFromAPI = async ({
         }
 
         // Fetch odds for this specific match
+        const preferredId = Number(process.env.FOOTBALL_API_BOOKMAKER || "6");
         const oddsResponse = await fetch(
           `https://v3.football.api-sports.io/odds?fixture=${fixture.fixture.id}`,
           {

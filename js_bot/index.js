@@ -620,7 +620,7 @@ function isUnder25Label(value) {
 }
 
 function probabilityFromOdd(odd) {
-  const value = Number(odd);
+  const value = normalizeOdd(odd);
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.round((1 / value) * 100);
 }
