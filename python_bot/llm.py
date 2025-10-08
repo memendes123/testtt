@@ -8,9 +8,9 @@ import requests
 
 
 class ChatGPTClient:
-    """Simple wrapper around the OpenAI Chat Completions API."""
+    """Simple wrapper around the OpenAI Responses API (GPT-4.1 family by default)."""
 
-    def __init__(self, api_key: Optional[str], model: str = "gpt-4o-mini", logger: Optional[logging.Logger] = None) -> None:
+    def __init__(self, api_key: Optional[str], model: str = "gpt-4.1-mini", logger: Optional[logging.Logger] = None) -> None:
         self.api_key = api_key
         self.model = model
         self.logger = logger or logging.getLogger(__name__)
@@ -28,43 +28,68 @@ class ChatGPTClient:
         }
         payload = {
             "model": self.model,
-            "messages": [
+            "input": [
                 {
                     "role": "system",
-                    "content": (
-                        "Você é um analista de apostas esportivas que cria insights objetivos e concisos. "
-                        "Resuma os dados recebidos em português europeu, indicando onde há oportunidades e riscos."
-                    ),
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Você é um analista de apostas esportivas que cria insights objetivos e concisos. "
+                                "Resuma os dados recebidos em português europeu, indicando onde há oportunidades e riscos."
+                            ),
+                        }
+                    ],
                 },
                 {
                     "role": "user",
-                    "content": (
-                        "Use os dados JSON abaixo para elaborar um parágrafo curto com duas a quatro frases "
-                        "destacando: estado atual das equipas, tendências de golos e indicações de aposta baseadas nas probabilidades.\n"
-                        f"Dados: {json.dumps(context, ensure_ascii=False)}"
-                    ),
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Use os dados JSON abaixo para elaborar um parágrafo curto com duas a quatro frases "
+                                "destacando: estado atual das equipas, tendências de golos e indicações de aposta baseadas nas probabilidades.\n"
+                                f"Dados: {json.dumps(context, ensure_ascii=False)}"
+                            ),
+                        }
+                    ],
                 },
             ],
             "temperature": 0.3,
-            "max_tokens": 250,
+            "max_output_tokens": 250,
         }
 
         try:
             response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
+                "https://api.openai.com/v1/responses",
                 headers=headers,
                 json=payload,
                 timeout=45,
             )
             response.raise_for_status()
             data = response.json()
-            choices = data.get("choices") or []
-            if not choices:
+            output = data.get("output") or data.get("choices")
+            if not output:
                 return None
-            message = choices[0].get("message") or {}
-            content = message.get("content")
-            if isinstance(content, str):
-                return content.strip()
+
+            if isinstance(output, list):
+                for item in output:
+                    content = item.get("content") if isinstance(item, dict) else None
+                    if isinstance(content, list):
+                        for part in content:
+                            text = part.get("text") if isinstance(part, dict) else None
+                            if isinstance(text, str) and text.strip():
+                                return text.strip()
+                    elif isinstance(content, dict):
+                        text = content.get("text")
+                        if isinstance(text, str) and text.strip():
+                            return text.strip()
+                    elif isinstance(content, str) and content.strip():
+                        return content.strip()
+
+            message = data.get("response") or data.get("content")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
             return None
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Falha ao obter resumo do ChatGPT", exc_info=exc)

@@ -3,12 +3,17 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from html import unescape
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import requests
-from bs4 import BeautifulSoup
+
+try:  # pragma: no cover - optional dependency handling
+    from bs4 import BeautifulSoup  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - graceful degradation when bs4 missing
+    BeautifulSoup = None  # type: ignore[assignment]
 
 
 FOREBET_URL_TEMPLATE = "https://www.forebet.com/en/football-tips-and-predictions-for-{slug}"
@@ -50,6 +55,14 @@ def _parse_percentage(value: Optional[str]) -> Optional[int]:
         return None
 
 
+def _decode_html_fragment(fragment: str) -> str:
+    text = re.sub(r"<br\s*/?>", " ", fragment)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
 class ForebetClient:
     """Lightweight scraper for Forebet daily predictions."""
 
@@ -57,13 +70,32 @@ class ForebetClient:
         self._session = requests.Session()
         self._session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                ),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "Connection": "keep-alive",
+                "Referer": "https://www.forebet.com/en/football-predictions",
             }
         )
+        self._mobile_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Connection": "keep-alive",
+            "Referer": "https://m.forebet.com/en/football-predictions",
+        }
         self._cache: Dict[str, Dict[str, ForebetProbabilities]] = {}
+        self._bs4_warning_emitted = False
         self._logger = logger or logging.getLogger(__name__)
 
     def _get_slug(self, date: datetime) -> str:
@@ -77,17 +109,42 @@ class ForebetClient:
         url = FOREBET_URL_TEMPLATE.format(slug=slug)
         try:
             response = self._session.get(url, timeout=30)
-            if response.status_code != 200:
-                self._logger.warning(
-                    "Forebet request failed", extra={"url": url, "status": response.status_code}
-                )
-                return None
-            return response.text
+            if response.status_code == 200:
+                return response.text
+
+            if response.status_code == 403:
+                mobile_url = url.replace("www.forebet.com", "m.forebet.com")
+                mobile_response = self._session.get(mobile_url, headers=self._mobile_headers, timeout=30)
+                if mobile_response.status_code == 200:
+                    self._logger.info(
+                        "Forebet mobile fallback used successfully",
+                        extra={"url": mobile_url},
+                    )
+                    return mobile_response.text
+
+            self._logger.warning(
+                "Forebet request failed",
+                extra={"url": url, "status": response.status_code},
+            )
+            return None
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("Unable to fetch Forebet page", extra={"error": str(exc), "url": url})
             return None
 
     def _parse_match_table(self, html: str) -> Dict[str, ForebetProbabilities]:
+        if BeautifulSoup is not None:
+            return self._parse_with_bs4(html)
+
+        if not self._bs4_warning_emitted:
+            self._logger.warning(
+                "BeautifulSoup is not installed; falling back to regex-based Forebet parser"
+            )
+            self._bs4_warning_emitted = True
+
+        return self._parse_without_bs4(html)
+
+    def _parse_with_bs4(self, html: str) -> Dict[str, ForebetProbabilities]:
+        assert BeautifulSoup is not None  # for type checkers
         soup = BeautifulSoup(html, "html.parser")
         tables = soup.select("table")
         results: Dict[str, ForebetProbabilities] = {}
@@ -116,44 +173,95 @@ class ForebetClient:
                         home_team = home_team or text_cells[1]
                         away_team = away_team or text_cells[2]
 
-                if not home_team or not away_team:
-                    continue
-
                 percentages: list[int] = []
                 for cell in cells:
                     percent = _parse_percentage(cell.get_text(" ", strip=True))
                     if percent is not None:
                         percentages.append(percent)
 
-                if len(percentages) < 3:
-                    continue
-
-                key = _build_key(home_team, away_team)
-                if not key or key in results:
-                    continue
-
-                home_prob, draw_prob, away_prob = percentages[:3]
-
-                # Attempt to capture Over/Under and BTTS if the row exposes more columns
-                over_prob = under_prob = btts_yes = btts_no = None
-                if len(percentages) >= 5:
-                    over_prob = percentages[3]
-                    under_prob = percentages[4]
-                if len(percentages) >= 7:
-                    btts_yes = percentages[5]
-                    btts_no = percentages[6]
-
-                results[key] = ForebetProbabilities(
-                    home=home_prob,
-                    draw=draw_prob,
-                    away=away_prob,
-                    over25=over_prob,
-                    under25=under_prob,
-                    btts_yes=btts_yes,
-                    btts_no=btts_no,
-                )
+                self._add_prediction(results, home_team, away_team, percentages)
 
         return results
+
+    def _parse_without_bs4(self, html: str) -> Dict[str, ForebetProbabilities]:
+        table_pattern = re.compile(r"<tr[^>]*>([\\s\\S]*?)</tr>", re.IGNORECASE)
+        cell_pattern = re.compile(r"<td[^>]*>([\\s\\S]*?)</td>", re.IGNORECASE)
+        home_pattern = re.compile(
+            r'class="[^"]*(?:home|tnms|team1)[^"]*"[^>]*>([\\s\\S]*?)</td>',
+            re.IGNORECASE,
+        )
+        away_pattern = re.compile(
+            r'class="[^"]*(?:away|tnms2|team2)[^"]*"[^>]*>([\\s\\S]*?)</td>',
+            re.IGNORECASE,
+        )
+
+        results: Dict[str, ForebetProbabilities] = {}
+
+        for row_match in table_pattern.finditer(html):
+            row_html = row_match.group(1)
+            cells = cell_pattern.findall(row_html)
+            if len(cells) < 3:
+                continue
+
+            home_match = home_pattern.search(row_html)
+            away_match = away_pattern.search(row_html)
+            home_team = _decode_html_fragment(home_match.group(1)) if home_match else ""
+            away_team = _decode_html_fragment(away_match.group(1)) if away_match else ""
+
+            if not home_team or not away_team:
+                decoded_cells = [_decode_html_fragment(cell) for cell in cells]
+                if len(decoded_cells) >= 3:
+                    home_team = home_team or decoded_cells[1]
+                    away_team = away_team or decoded_cells[2]
+
+            percentages: list[int] = []
+            for cell in cells:
+                percent = _parse_percentage(_decode_html_fragment(cell))
+                if percent is not None:
+                    percentages.append(percent)
+
+            self._add_prediction(results, home_team, away_team, percentages)
+
+        return results
+
+    def _add_prediction(
+        self,
+        results: Dict[str, ForebetProbabilities],
+        home_team: Optional[str],
+        away_team: Optional[str],
+        percentages: Sequence[int],
+    ) -> None:
+        if not home_team or not away_team:
+            return
+
+        if len(percentages) < 3:
+            return
+
+        key = _build_key(home_team, away_team)
+        if not key or key in results:
+            return
+
+        home_prob = percentages[0]
+        draw_prob = percentages[1]
+        away_prob = percentages[2]
+
+        over_prob = under_prob = btts_yes = btts_no = None
+        if len(percentages) >= 5:
+            over_prob = percentages[3]
+            under_prob = percentages[4]
+        if len(percentages) >= 7:
+            btts_yes = percentages[5]
+            btts_no = percentages[6]
+
+        results[key] = ForebetProbabilities(
+            home=home_prob,
+            draw=draw_prob,
+            away=away_prob,
+            over25=over_prob,
+            under25=under_prob,
+            btts_yes=btts_yes,
+            btts_no=btts_no,
+        )
 
     def _load_predictions(self, date: datetime) -> Dict[str, ForebetProbabilities]:
         iso = date.strftime("%Y-%m-%d")

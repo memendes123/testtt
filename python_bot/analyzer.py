@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import statistics
 import unicodedata
 from typing import Dict, List, Optional
 
@@ -80,16 +81,19 @@ def _is_under_25_label(value: Optional[object]) -> bool:
     return False
 
 
-def _calculate_probability(odd: Optional[str]) -> int:
-    if not odd:
-        return 0
-    try:
+def _normalize_odd_value(odd: Optional[object]) -> Optional[float]:
+    if odd is None:
+        return None
+
+    if isinstance(odd, (int, float)):
         value = float(odd)
         return value if value > 0 else None
 
-    text = str(odd).strip().lower()
+    text = str(odd).strip()
     if not text:
         return None
+
+    text = text.lower()
 
     # Support fractional odds such as "3/2".
     if "/" in text:
@@ -98,14 +102,14 @@ def _calculate_probability(odd: Optional[str]) -> int:
             try:
                 numerator = float(parts[0].strip().replace(",", "."))
                 denominator = float(parts[1].strip().replace(",", "."))
-                if denominator > 0:
-                    decimal_value = 1 + (numerator / denominator)
-                    return decimal_value if decimal_value > 0 else None
             except ValueError:
                 return None
+            if denominator > 0:
+                decimal_value = 1 + (numerator / denominator)
+                return decimal_value if decimal_value > 0 else None
 
     cleaned = text.replace(",", ".")
-    match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    match = re.search(r"\d+(?:\.\d+)?", cleaned)
     if not match:
         return None
 
@@ -279,16 +283,18 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
                 )
                 qualitative_boost += 1
 
-        avg_attack = 0.0
+        avg_attack_samples = []
         if home_form and isinstance(home_form, dict):
-            avg_attack += float(home_form.get("avgGoalsFor", 0.0))
+            avg_attack_samples.append(float(home_form.get("avgGoalsFor", 0.0)))
         if away_form and isinstance(away_form, dict):
-            avg_attack += float(away_form.get("avgGoalsFor", 0.0))
+            avg_attack_samples.append(float(away_form.get("avgGoalsFor", 0.0)))
 
-        if avg_attack >= 3.2:
-            notes.append("Tendência de muitos golos (médias ofensivas altas nas últimas partidas)")
-        elif avg_attack <= 2.0:
-            notes.append("Tendência de poucos golos nos últimos jogos das equipas")
+        if avg_attack_samples:
+            avg_attack = statistics.mean(avg_attack_samples)
+            if avg_attack >= 1.6:
+                notes.append("Tendência de muitos golos (médias ofensivas altas nas últimas partidas)")
+            elif avg_attack <= 1.0:
+                notes.append("Tendência de poucos golos nos últimos jogos das equipas")
 
         if head_to_head and isinstance(head_to_head, dict):
             if int(head_to_head.get("homeWins", 0) or 0) >= 3:
@@ -301,50 +307,145 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             notes.append("Probabilidades 1X2 complementadas com dados da Forebet")
 
 
-        draw_rate = (
-            float(home_form.get("drawRate", 0.0)) if isinstance(home_form, dict) else 0.0
-        ) + (
-            float(away_form.get("drawRate", 0.0)) if isinstance(away_form, dict) else 0.0
-        )
-        form_count = (1 if home_form else 0) + (1 if away_form else 0) or 1
-        draw_rate /= form_count
+        def _form_strength(form: Optional[Dict[str, object]]) -> Optional[float]:
+            if not isinstance(form, dict) or not form:
+                return None
+
+            win_rate = float(form.get("winRate", 0.0) or 0.0)
+            draw_rate = float(form.get("drawRate", 0.0) or 0.0)
+            loss_rate = float(form.get("lossRate", 0.0) or 0.0)
+            goal_diff = float(form.get("goalDifferenceAvg", 0.0) or 0.0)
+            avg_for = float(form.get("avgGoalsFor", 0.0) or 0.0)
+            avg_against = float(form.get("avgGoalsAgainst", 0.0) or 0.0)
+            form_points = float(form.get("formPoints", 0.0) or 0.0)
+            sample_size = max(int(form.get("sampleSize", 0) or len(form.get("matches") or [])), 1)
+            streak = form.get("currentStreak") if isinstance(form.get("currentStreak"), dict) else {}
+            streak_bonus = 0.0
+            if streak.get("type") == "win":
+                streak_bonus = min(int(streak.get("count", 0) or 0), 5) * 0.08
+            elif streak.get("type") == "loss":
+                streak_bonus = -min(int(streak.get("count", 0) or 0), 5) * 0.08
+
+            momentum = min(form_points / (sample_size * 3), 1.0)
+            defence_quality = max(0.0, 3.0 - min(max(avg_against, 0.0), 3.0)) / 3.0
+            attack_quality = min(max(avg_for, 0.0), 4.0) / 4.0
+
+            rating = 1.0
+            rating += win_rate * 1.8
+            rating += (1.0 - loss_rate) * 0.6
+            rating += draw_rate * 0.3
+            rating += max(min(goal_diff, 3.5), -3.5) * 0.12
+            rating += momentum * 0.4
+            rating += attack_quality * 0.25
+            rating += defence_quality * 0.2
+            rating += streak_bonus
+
+            return max(0.35, rating)
+
+        def _estimate_draw_component(
+            home_data: Optional[Dict[str, object]], away_data: Optional[Dict[str, object]]
+        ) -> float:
+            base = 0.9
+            total_samples = 0
+            draw_bias = 0.0
+            for data in (home_data, away_data):
+                if not isinstance(data, dict) or not data:
+                    continue
+                total_samples += 1
+                draw_bias += float(data.get("drawRate", 0.0) or 0.0) * 1.2
+                avg_total = float(data.get("avgGoalsTotal", 0.0) or 0.0)
+                draw_bias += max(0.0, 2.2 - avg_total) * 0.2
+            if total_samples:
+                base += draw_bias / total_samples
+            return max(0.5, min(base, 1.8))
 
         if (
             predictions["homeWinProbability"] == 0
             and predictions["awayWinProbability"] == 0
             and predictions["drawProbability"] == 0
-            and (home_form or away_form)
         ):
-            draw_probability = round(min(draw_rate, 0.45) * 100)
+            home_strength = _form_strength(home_form)
+            away_strength = _form_strength(away_form)
 
-            home_score = 0.0
-            away_score = 0.0
-            if isinstance(home_form, dict):
-                home_score += float(home_form.get("winRate", 0.0))
-                home_score += max(float(home_form.get("goalDifferenceAvg", 0.0)), 0)
-            if isinstance(away_form, dict):
-                home_score += float(away_form.get("lossRate", 0.0)) * 0.6
-
-            if isinstance(away_form, dict):
-                away_score += float(away_form.get("winRate", 0.0))
-                away_score += max(float(away_form.get("goalDifferenceAvg", 0.0)), 0)
-            if isinstance(home_form, dict):
-                away_score += float(home_form.get("lossRate", 0.0)) * 0.6
-
-            total_score = home_score + away_score
-            available = max(0, 100 - draw_probability)
-
-            if total_score > 0:
-                entry["predictions"]["homeWinProbability"] = round((home_score / total_score) * available)
-                entry["predictions"]["awayWinProbability"] = max(
-                    0,
-                    available - entry["predictions"]["homeWinProbability"],
-                )
+            if home_strength is None and away_strength is None:
+                predictions["homeWinProbability"] = 38
+                predictions["drawProbability"] = 24
+                predictions["awayWinProbability"] = 38
             else:
-                entry["predictions"]["homeWinProbability"] = round(available / 2)
-                entry["predictions"]["awayWinProbability"] = available - entry["predictions"]["homeWinProbability"]
+                home_strength = home_strength or 0.85
+                away_strength = away_strength or 0.85
+                draw_component = _estimate_draw_component(home_form, away_form)
 
-            entry["predictions"]["drawProbability"] = draw_probability
+                total = home_strength + away_strength + draw_component
+                if total <= 0:
+                    predictions["homeWinProbability"] = 38
+                    predictions["drawProbability"] = 24
+                    predictions["awayWinProbability"] = 38
+                else:
+                    home_pct = round((home_strength / total) * 100)
+                    draw_pct = round((draw_component / total) * 100)
+                    away_pct = max(0, 100 - home_pct - draw_pct)
+
+                    predictions["homeWinProbability"] = max(0, min(100, home_pct))
+                    predictions["drawProbability"] = max(0, min(100, draw_pct))
+                    predictions["awayWinProbability"] = max(0, min(100, away_pct))
+
+        goal_samples: List[float] = []
+        for form in (home_form, away_form):
+            if isinstance(form, dict) and form:
+                goal_samples.append(float(form.get("avgGoalsTotal", 0.0) or 0.0))
+
+        if (
+            predictions["over25Probability"] == 0
+            and predictions["under25Probability"] == 0
+            and goal_samples
+        ):
+            avg_goals = statistics.mean(goal_samples)
+            if avg_goals >= 3.2:
+                over_prob = min(78, round(62 + (avg_goals - 3.2) * 12))
+                under_prob = max(100 - over_prob, 18)
+            elif avg_goals <= 1.8:
+                under_prob = min(80, round(64 + (1.8 - avg_goals) * 18))
+                over_prob = max(100 - under_prob, 18)
+            else:
+                tilt = (avg_goals - 2.5) * 18
+                over_prob = max(40, min(60, round(52 + tilt)))
+                under_prob = max(40, min(60, 100 - over_prob))
+
+            predictions["over25Probability"] = over_prob
+            predictions["under25Probability"] = max(0, min(100, under_prob))
+
+        if (
+            predictions["bttsYesProbability"] == 0
+            and predictions["bttsNoProbability"] == 0
+            and goal_samples
+        ):
+            total_matches = 0
+            clean_sheets = 0
+            failures = 0
+            for form in (home_form, away_form):
+                if not isinstance(form, dict) or not form:
+                    continue
+                sample = max(int(form.get("sampleSize", 0) or len(form.get("matches") or [])), 1)
+                total_matches += sample
+                clean_sheets += int(form.get("cleanSheets", 0) or 0)
+                failures += int(form.get("failedToScore", 0) or 0)
+
+            shutout_rate = clean_sheets / total_matches if total_matches else 0.0
+            fail_rate = failures / total_matches if total_matches else 0.0
+            avg_goals = statistics.mean(goal_samples)
+
+            yes_score = (1 - shutout_rate) * 0.5 + (1 - fail_rate) * 0.3 + max(0.0, avg_goals - 2.3) * 0.25
+            no_score = shutout_rate * 0.5 + fail_rate * 0.3 + max(0.0, 2.3 - avg_goals) * 0.25
+
+            if yes_score >= no_score:
+                yes_prob = max(35, min(80, round(yes_score * 100)))
+                predictions["bttsYesProbability"] = yes_prob
+                predictions["bttsNoProbability"] = max(0, min(100, 100 - yes_prob))
+            else:
+                no_prob = max(35, min(80, round(no_score * 100)))
+                predictions["bttsNoProbability"] = no_prob
+                predictions["bttsYesProbability"] = max(0, min(100, 100 - no_prob))
 
         entry["analysisNotes"] = notes[:3]
         confidence_score += qualitative_boost
