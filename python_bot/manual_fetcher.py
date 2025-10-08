@@ -124,42 +124,56 @@ def _fetch_fixture_between(team_a: int, team_b: int, settings: Settings, logger:
     return None
 
 
-def _fetch_odds(fixture_id: int, settings: Settings, logger: logging.Logger) -> list[Dict[str, object]]:
-    try:
-        params = {"fixture": fixture_id}
-        if settings.bookmaker_id:
-            params["bookmaker"] = settings.bookmaker_id
-
-        response = requests.get(
-            f"{API_BASE}/odds",
-            params=params,
-            headers=_headers(settings),
-            timeout=30,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        response_items = payload.get("response") or []
-        bookmakers = []
-        if response_items:
-            first_item = response_items[0] or {}
-            bookmakers = first_item.get("bookmakers") or []
-
-        seen_markets: dict[str, list[dict[str, object]]] = {}
-        for bookmaker in bookmakers:
-            for bet in bookmaker.get("bets", []):
-                name = bet.get("name")
-                if not isinstance(name, str):
-                    continue
-                if name not in seen_markets or not seen_markets[name]:
-                    seen_markets[name] = bet.get("values") or []
-
-        return [{"name": market, "values": values} for market, values in seen_markets.items()]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Não foi possível obter odds para o fixture",
-            extra={"fixtureId": fixture_id, "error": str(exc)},
-        )
+def _parse_odds_payload(payload: Dict[str, object]) -> list[Dict[str, object]]:
+    response_items = payload.get("response") or []
+    if not response_items:
         return []
+
+    first_item = response_items[0] or {}
+    bookmakers = first_item.get("bookmakers") or []
+
+    seen_markets: dict[str, list[dict[str, object]]] = {}
+    for bookmaker in bookmakers:
+        for bet in bookmaker.get("bets", []):
+            name = bet.get("name")
+            if not isinstance(name, str):
+                continue
+            if name not in seen_markets or not seen_markets[name]:
+                seen_markets[name] = bet.get("values") or []
+
+    return [{"name": market, "values": values} for market, values in seen_markets.items()]
+
+
+def _fetch_odds(fixture_id: int, settings: Settings, logger: logging.Logger) -> list[Dict[str, object]]:
+    attempts: list[Dict[str, object]] = []
+    base_params = {"fixture": fixture_id}
+    if settings.bookmaker_id:
+        attempts.append({**base_params, "bookmaker": settings.bookmaker_id})
+    attempts.append(base_params)
+
+    for idx, params in enumerate(attempts, start=1):
+        try:
+            response = requests.get(
+                f"{API_BASE}/odds",
+                params=params,
+                headers=_headers(settings),
+                timeout=30,
+            )
+            response.raise_for_status()
+            markets = _parse_odds_payload(response.json())
+            if markets:
+                return markets
+            logger.debug(
+                "Sem odds no resultado recebido",
+                extra={"fixtureId": fixture_id, "attempt": idx, "params": params},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Não foi possível obter odds para o fixture",
+                extra={"fixtureId": fixture_id, "error": str(exc), "attempt": idx},
+            )
+
+    return []
 
 
 def _build_match_entry(
