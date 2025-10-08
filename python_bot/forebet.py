@@ -6,7 +6,7 @@ import unicodedata
 from html import unescape
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, cast
 
 import requests
 
@@ -143,13 +143,9 @@ class ForebetClient:
                         home_team = home_team or text_cells[1]
                         away_team = away_team or text_cells[2]
 
-                percentages: list[int] = []
-                for cell in cells:
-                    percent = _parse_percentage(cell.get_text(" ", strip=True))
-                    if percent is not None:
-                        percentages.append(percent)
-
-                self._add_prediction(results, home_team, away_team, percentages)
+                self._add_prediction(results, home_team, away_team, [
+                    _parse_percentage(cell.get_text(" ", strip=True)) for cell in cells
+                ])
 
         return results
 
@@ -184,12 +180,7 @@ class ForebetClient:
                     home_team = home_team or decoded_cells[1]
                     away_team = away_team or decoded_cells[2]
 
-            percentages: list[int] = []
-            for cell in cells:
-                percent = _parse_percentage(_decode_html_fragment(cell))
-                if percent is not None:
-                    percentages.append(percent)
-
+            percentages = [_parse_percentage(_decode_html_fragment(cell)) for cell in cells]
             self._add_prediction(results, home_team, away_team, percentages)
 
         return results
@@ -199,7 +190,7 @@ class ForebetClient:
         results: Dict[str, ForebetProbabilities],
         home_team: Optional[str],
         away_team: Optional[str],
-        percentages: Sequence[int],
+        percentages: list[Optional[int]],
     ) -> None:
         if not home_team or not away_team:
             return
@@ -207,19 +198,23 @@ class ForebetClient:
         if len(percentages) < 3:
             return
 
+        first_three = percentages[:3]
+        if any(value is None for value in first_three):
+            return
+
         key = _build_key(home_team, away_team)
         if not key or key in results:
             return
 
-        home_prob = percentages[0]
-        draw_prob = percentages[1]
-        away_prob = percentages[2]
+        home_prob = cast(int, first_three[0])
+        draw_prob = cast(int, first_three[1])
+        away_prob = cast(int, first_three[2])
 
         over_prob = under_prob = btts_yes = btts_no = None
-        if len(percentages) >= 5:
+        if len(percentages) >= 5 and percentages[3] is not None and percentages[4] is not None:
             over_prob = percentages[3]
             under_prob = percentages[4]
-        if len(percentages) >= 7:
+        if len(percentages) >= 7 and percentages[5] is not None and percentages[6] is not None:
             btts_yes = percentages[5]
             btts_no = percentages[6]
 
