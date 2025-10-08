@@ -80,16 +80,19 @@ def _is_under_25_label(value: Optional[object]) -> bool:
     return False
 
 
-def _calculate_probability(odd: Optional[str]) -> int:
-    if not odd:
-        return 0
-    try:
+def _normalize_odd_value(odd: Optional[object]) -> Optional[float]:
+    if odd is None:
+        return None
+
+    if isinstance(odd, (int, float)):
         value = float(odd)
         return value if value > 0 else None
 
-    text = str(odd).strip().lower()
+    text = str(odd).strip()
     if not text:
         return None
+
+    text = text.lower()
 
     # Support fractional odds such as "3/2".
     if "/" in text:
@@ -98,14 +101,14 @@ def _calculate_probability(odd: Optional[str]) -> int:
             try:
                 numerator = float(parts[0].strip().replace(",", "."))
                 denominator = float(parts[1].strip().replace(",", "."))
-                if denominator > 0:
-                    decimal_value = 1 + (numerator / denominator)
-                    return decimal_value if decimal_value > 0 else None
             except ValueError:
                 return None
+            if denominator > 0:
+                decimal_value = 1 + (numerator / denominator)
+                return decimal_value if decimal_value > 0 else None
 
     cleaned = text.replace(",", ".")
-    match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    match = re.search(r"\d+(?:\.\d+)?", cleaned)
     if not match:
         return None
 
