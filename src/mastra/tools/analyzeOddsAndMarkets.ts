@@ -87,41 +87,6 @@ const NO_LABELS = new Set([
   "n",
 ]);
 
-const normalizeOdd = (odd: unknown): number | null => {
-  if (odd === undefined || odd === null) {
-    return null;
-  }
-
-  if (typeof odd === "number") {
-    return odd > 0 ? odd : null;
-  }
-
-  const text = odd.toString().trim().toLowerCase();
-  if (!text) {
-    return null;
-  }
-
-  if (text.includes("/")) {
-    const [numeratorRaw, denominatorRaw] = text.split("/");
-    if (denominatorRaw) {
-      const numerator = Number(numeratorRaw.replace(",", "."));
-      const denominator = Number(denominatorRaw.replace(",", "."));
-      if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
-        const decimalValue = 1 + numerator / denominator;
-        return decimalValue > 0 ? decimalValue : null;
-      }
-    }
-  }
-
-  const match = text.replace(/,/g, ".").match(/-?\d+(?:\.\d+)?/);
-  if (!match) {
-    return null;
-  }
-
-  const value = Number(match[0]);
-  return Number.isFinite(value) && value > 0 ? value : null;
-};
-
 const MARKET_ALIASES = new Map<string, Set<string>>([
   [
     "match_winner",
@@ -145,6 +110,79 @@ const normalizeMarketName = (value: unknown): string => {
   }
   return normalized;
 };
+
+const isOver25Label = (value: unknown): boolean => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+
+  if (normalized.includes("over") || normalized.includes("mais de")) {
+    return normalized.includes("2.5") || normalized.includes("25");
+  }
+
+  return false;
+};
+
+const isUnder25Label = (value: unknown): boolean => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+
+  if (normalized.includes("under") || normalized.includes("menos de")) {
+    return normalized.includes("2.5") || normalized.includes("25");
+  }
+
+  return false;
+};
+
+const normalizeMarketValue = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return value
+    .toString()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[,]/g, ".")
+    .replace(/[()]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+};
+
+const HOME_LABELS = new Set([
+  "home",
+  "1",
+  "home team",
+  "team 1",
+  "1 home",
+]);
+
+const DRAW_LABELS = new Set([
+  "draw",
+  "x",
+  "empate",
+]);
+
+const AWAY_LABELS = new Set([
+  "away",
+  "2",
+  "away team",
+  "team 2",
+  "2 away",
+]);
+
+const YES_LABELS = new Set([
+  "yes",
+  "sim",
+  "y",
+  "s",
+]);
+
+const NO_LABELS = new Set([
+  "no",
+  "nao",
+  "n",
+]);
 
 const isOver25Label = (value: unknown): boolean => {
   const normalized = normalizeMarketValue(value);
@@ -229,10 +267,14 @@ const analyzeMatchOdds = ({
         const homeEntry = matchWinnerBet.find((v: any) => HOME_LABELS.has(normalizeMarketValue(v.value)));
         const drawEntry = matchWinnerBet.find((v: any) => DRAW_LABELS.has(normalizeMarketValue(v.value)));
         const awayEntry = matchWinnerBet.find((v: any) => AWAY_LABELS.has(normalizeMarketValue(v.value)));
+      if (matchWinnerBet && matchWinnerBet.values) {
+        const homeEntry = matchWinnerBet.values.find((v: any) => HOME_LABELS.has(normalizeMarketValue(v.value)));
+        const drawEntry = matchWinnerBet.values.find((v: any) => DRAW_LABELS.has(normalizeMarketValue(v.value)));
+        const awayEntry = matchWinnerBet.values.find((v: any) => AWAY_LABELS.has(normalizeMarketValue(v.value)));
 
-        const homeOdd = normalizeOdd(homeEntry?.odd ?? null);
-        const drawOdd = normalizeOdd(drawEntry?.odd ?? null);
-        const awayOdd = normalizeOdd(awayEntry?.odd ?? null);
+        const homeOdd = parseFloat(homeEntry?.odd ?? "0");
+        const drawOdd = parseFloat(drawEntry?.odd ?? "0");
+        const awayOdd = parseFloat(awayEntry?.odd ?? "0");
 
         if (homeOdd && homeOdd > 0) analysis.predictions.homeWinProbability = Math.round((1 / homeOdd) * 100);
         if (drawOdd && drawOdd > 0) analysis.predictions.drawProbability = Math.round((1 / drawOdd) * 100);
@@ -249,6 +291,12 @@ const analyzeMatchOdds = ({
       if (overUnderBet) {
         const overEntry = overUnderBet.find((v: any) => isOver25Label(v.value));
         const underEntry = overUnderBet.find((v: any) => isUnder25Label(v.value));
+      if (overUnderBet && overUnderBet.values) {
+        const overEntry = overUnderBet.values.find((v: any) => isOver25Label(v.value));
+        const underEntry = overUnderBet.values.find((v: any) => isUnder25Label(v.value));
+
+        const over25Odd = parseFloat(overEntry?.odd ?? "0");
+        const under25Odd = parseFloat(underEntry?.odd ?? "0");
 
         const over25Odd = normalizeOdd(overEntry?.odd ?? null);
         const under25Odd = normalizeOdd(underEntry?.odd ?? null);
@@ -267,9 +315,12 @@ const analyzeMatchOdds = ({
       if (bttsBet) {
         const yesEntry = bttsBet.find((v: any) => YES_LABELS.has(normalizeMarketValue(v.value)));
         const noEntry = bttsBet.find((v: any) => NO_LABELS.has(normalizeMarketValue(v.value)));
+      if (bttsBet && bttsBet.values) {
+        const yesEntry = bttsBet.values.find((v: any) => YES_LABELS.has(normalizeMarketValue(v.value)));
+        const noEntry = bttsBet.values.find((v: any) => NO_LABELS.has(normalizeMarketValue(v.value)));
 
-        const bttsYesOdd = normalizeOdd(yesEntry?.odd ?? null);
-        const bttsNoOdd = normalizeOdd(noEntry?.odd ?? null);
+        const bttsYesOdd = parseFloat(yesEntry?.odd ?? "0");
+        const bttsNoOdd = parseFloat(noEntry?.odd ?? "0");
 
         if (bttsYesOdd && bttsYesOdd > 0)
           analysis.predictions.bttsYesProbability = Math.round((1 / bttsYesOdd) * 100);

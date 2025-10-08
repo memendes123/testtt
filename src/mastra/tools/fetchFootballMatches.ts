@@ -231,7 +231,7 @@ const fetchFootballMatchesFromAPI = async ({
         // Fetch odds for this specific match
         const preferredId = Number(process.env.FOOTBALL_API_BOOKMAKER || "6");
         const oddsResponse = await fetch(
-          `https://v3.football.api-sports.io/odds?fixture=${fixture.fixture.id}&bookmaker=${preferredId}`,
+          `https://v3.football.api-sports.io/odds?fixture=${fixture.fixture.id}`,
           {
             headers: {
               "X-RapidAPI-Key": apiKey,
@@ -245,6 +245,7 @@ const fetchFootballMatchesFromAPI = async ({
           const oddsData = await oddsResponse.json();
           if (oddsData.response && oddsData.response.length > 0) {
             const bookmakers = oddsData.response[0]?.bookmakers ?? [];
+            const preferredId = Number(process.env.FOOTBALL_API_BOOKMAKER || "6");
             const ordered = [
               ...bookmakers.filter((bookmaker: any) => bookmaker.id === preferredId),
               ...bookmakers.filter((bookmaker: any) => bookmaker.id !== preferredId),

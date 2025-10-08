@@ -259,6 +259,7 @@ def fetch_matches(
     head_to_head_cache: Dict[Tuple[int, int], Optional[Dict[str, object]]] = {}
     forebet_client = ForebetClient(logger=logger)
 
+
     def get_team_form(team_id: Optional[int]) -> Optional[Dict[str, object]]:
         if not team_id:
             return None
@@ -326,7 +327,7 @@ def fetch_matches(
         odds_data: List[Dict[str, object]] = []
         odds_response = requests.get(
             "https://v3.football.api-sports.io/odds",
-            params={"fixture": fixture_id, "bookmaker": settings.bookmaker_id},
+            params={"fixture": fixture_id},
             headers=headers,
             timeout=30,
         )
@@ -338,18 +339,7 @@ def fetch_matches(
                 bookmakers = []
 
             seen_markets: Dict[str, List[Dict[str, object]]] = {}
-            preferred_id = settings.bookmaker_id
-            ordered_bookmakers = [
-                bookmaker
-                for bookmaker in (bookmakers or [])
-                if int(bookmaker.get("id", -1) or -1) == preferred_id
-            ] + [
-                bookmaker
-                for bookmaker in (bookmakers or [])
-                if int(bookmaker.get("id", -1) or -1) != preferred_id
-            ]
-
-            for bookmaker in ordered_bookmakers:
+            for bookmaker in bookmakers or []:
                 bets = bookmaker.get("bets") or []
                 for bet in bets:
                     name = bet.get("name")
@@ -432,6 +422,7 @@ def fetch_matches(
             "venue": fixture_info.get("venue", {}).get("name") or "TBD",
             "odds": odds_data,
             "forebet": forebet_data,
+
             "form": {
                 "home": home_form,
                 "away": away_form,

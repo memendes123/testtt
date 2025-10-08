@@ -80,13 +80,10 @@ def _is_under_25_label(value: Optional[object]) -> bool:
     return False
 
 
-def _normalize_odd_value(odd: Optional[object]) -> Optional[float]:
-    """Convert a bookmaker odd into a decimal float value."""
-
-    if odd is None:
-        return None
-
-    if isinstance(odd, (int, float)):
+def _calculate_probability(odd: Optional[str]) -> int:
+    if not odd:
+        return 0
+    try:
         value = float(odd)
         return value if value > 0 else None
 
@@ -302,6 +299,7 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
 
         if forebet_used:
             notes.append("Probabilidades 1X2 complementadas com dados da Forebet")
+
 
         draw_rate = (
             float(home_form.get("drawRate", 0.0)) if isinstance(home_form, dict) else 0.0
