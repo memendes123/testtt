@@ -10,6 +10,137 @@ import {
   REGION_ORDER,
 } from "../constants/competitions";
 
+const decodeHtml = (value: string | null | undefined): string => {
+  if (!value) return "";
+  return value
+    .replace(/<br\s*\/?\s*>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .trim();
+};
+
+const buildForebetKey = (home: string | null | undefined, away: string | null | undefined): string | null => {
+  const normalize = (text: string | null | undefined) =>
+    (text ?? "")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/[^a-z0-9]+/gi, " ")
+      .trim()
+      .toLowerCase();
+
+  const homeKey = normalize(home);
+  const awayKey = normalize(away);
+  if (!homeKey || !awayKey) return null;
+  return `${homeKey}|${awayKey}`;
+};
+
+const parsePercentages = (text: string): number[] => {
+  const matches = [...text.matchAll(/(-?\d+(?:\.\d+)?)\s*%/g)];
+  return matches.map((match) => Number(match[1]));
+};
+
+const parseForebetHtml = (html: string, logger?: IMastraLogger) => {
+  const results = new Map<string, Record<string, number | string | undefined>>();
+  if (!html) return results;
+
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch: RegExpExecArray | null;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const rowHtml = rowMatch[1];
+    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const cells: string[] = [];
+    let cellMatch: RegExpExecArray | null;
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      cells.push(decodeHtml(cellMatch[1]));
+    }
+
+    if (cells.length < 3) continue;
+
+    let homeTeam = null as string | null;
+    let awayTeam = null as string | null;
+
+    const homeMatch = rowHtml.match(/class="[^"]*(home|tnms|team1)[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const awayMatch = rowHtml.match(/class="[^"]*(away|tnms2|team2)[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+
+    if (homeMatch) homeTeam = decodeHtml(homeMatch[2]);
+    if (awayMatch) awayTeam = decodeHtml(awayMatch[2]);
+
+    if (!homeTeam || !awayTeam) {
+      homeTeam = homeTeam || cells[1] || null;
+      awayTeam = awayTeam || cells[2] || null;
+    }
+
+    if (!homeTeam || !awayTeam) continue;
+
+    const percentages = cells.flatMap((cell) => parsePercentages(cell));
+    if (percentages.length < 3) continue;
+
+    const key = buildForebetKey(homeTeam, awayTeam);
+    if (!key || results.has(key)) continue;
+
+    const [homeProb, drawProb, awayProb] = percentages;
+    const overProb = percentages[3];
+    const underProb = percentages[4];
+    const bttsYes = percentages[5];
+    const bttsNo = percentages[6];
+
+    results.set(key, {
+      source: "Forebet",
+      homeWinProbability: Math.round(homeProb ?? 0),
+      drawProbability: Math.round(drawProb ?? 0),
+      awayWinProbability: Math.round(awayProb ?? 0),
+      over25Probability: overProb !== undefined ? Math.round(overProb) : undefined,
+      under25Probability: underProb !== undefined ? Math.round(underProb) : undefined,
+      bttsYesProbability: bttsYes !== undefined ? Math.round(bttsYes) : undefined,
+      bttsNoProbability: bttsNo !== undefined ? Math.round(bttsNo) : undefined,
+    });
+  }
+
+  logger?.info("📝 [FetchFootballMatches] Parsed Forebet predictions", { total: results.size });
+  return results;
+};
+
+const fetchForebetPredictions = async (date: string, logger?: IMastraLogger) => {
+  try {
+    const target = new Date(`${date}T00:00:00Z`);
+    const now = new Date();
+    const isToday =
+      target.getUTCFullYear() === now.getUTCFullYear() &&
+      target.getUTCMonth() === now.getUTCMonth() &&
+      target.getUTCDate() === now.getUTCDate();
+    const slug = isToday ? "today" : date;
+    const response = await fetch(
+      `https://www.forebet.com/en/football-tips-and-predictions-for-${slug}`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      logger?.warn("📝 [FetchFootballMatches] Forebet request failed", { status: response.status });
+      return new Map<string, Record<string, number | string | undefined>>();
+    }
+
+    const html = await response.text();
+    return parseForebetHtml(html, logger);
+  } catch (error) {
+    logger?.warn("📝 [FetchFootballMatches] Unable to fetch Forebet predictions", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return new Map<string, Record<string, number | string | undefined>>();
+  }
+};
+
 const fetchFootballMatchesFromAPI = async ({
   date,
   logger,
@@ -72,6 +203,7 @@ const fetchFootballMatchesFromAPI = async ({
     }
 
     const matches: any[] = [];
+    const forebetPredictions = await fetchForebetPredictions(date, logger);
 
     const regionCounters: Record<string, { total: number }> = {};
     REGION_ORDER.forEach((region) => {
@@ -97,8 +229,9 @@ const fetchFootballMatchesFromAPI = async ({
         }
 
         // Fetch odds for this specific match
+        const preferredId = Number(process.env.FOOTBALL_API_BOOKMAKER || "6");
         const oddsResponse = await fetch(
-          `https://v3.football.api-sports.io/odds?fixture=${fixture.fixture.id}&bookmaker=6`, // Bet365
+          `https://v3.football.api-sports.io/odds?fixture=${fixture.fixture.id}&bookmaker=${preferredId}`,
           {
             headers: {
               "X-RapidAPI-Key": apiKey,
@@ -111,10 +244,26 @@ const fetchFootballMatchesFromAPI = async ({
         if (oddsResponse.ok) {
           const oddsData = await oddsResponse.json();
           if (oddsData.response && oddsData.response.length > 0) {
-            odds = oddsData.response[0].bookmakers[0]?.bets || [];
-            logger?.info("📝 [FetchFootballMatches] Retrieved odds", { 
+            const bookmakers = oddsData.response[0]?.bookmakers ?? [];
+            const ordered = [
+              ...bookmakers.filter((bookmaker: any) => bookmaker.id === preferredId),
+              ...bookmakers.filter((bookmaker: any) => bookmaker.id !== preferredId),
+            ];
+
+            const marketMap = new Map<string, any[]>();
+            for (const bookmaker of ordered) {
+              for (const bet of bookmaker?.bets ?? []) {
+                if (!bet?.name) continue;
+                if (!marketMap.has(bet.name) || !(marketMap.get(bet.name)?.length > 0)) {
+                  marketMap.set(bet.name, bet.values ?? []);
+                }
+              }
+            }
+
+            odds = Array.from(marketMap.entries()).map(([name, values]) => ({ name, values }));
+            logger?.info("📝 [FetchFootballMatches] Retrieved odds", {
               fixtureId: fixture.fixture.id,
-              oddsCount: odds.length 
+              oddsCount: odds.length
             });
           }
         } else {
@@ -123,6 +272,12 @@ const fetchFootballMatchesFromAPI = async ({
             status: oddsResponse.status 
           });
         }
+
+        const forebetKey = buildForebetKey(
+          fixture.teams?.home?.name,
+          fixture.teams?.away?.name,
+        );
+        const forebet = forebetKey ? forebetPredictions.get(forebetKey) ?? null : null;
 
         matches.push({
           fixtureId: fixture.fixture.id,
@@ -154,7 +309,8 @@ const fetchFootballMatchesFromAPI = async ({
             },
           },
           venue: fixture.fixture.venue?.name || "TBD",
-          odds: odds,
+          odds,
+          forebet,
         });
 
         if (!regionCounters[competition.region]) {
