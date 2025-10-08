@@ -187,6 +187,43 @@ async function fetchMatches(date, settings, logger) {
   };
 }
 
+function normalizeMarketValue(value) {
+  if (value === undefined || value === null) return '';
+  return value
+    .toString()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[,]/g, '.')
+    .replace(/[()]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+const HOME_LABELS = new Set(['home', '1', 'home team', 'team 1', '1 home']);
+const DRAW_LABELS = new Set(['draw', 'x', 'empate']);
+const AWAY_LABELS = new Set(['away', '2', 'away team', 'team 2', '2 away']);
+const YES_LABELS = new Set(['yes', 'sim', 'y', 's']);
+const NO_LABELS = new Set(['no', 'nao', 'n']);
+
+function isOver25Label(value) {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+  if (normalized.includes('over') || normalized.includes('mais de')) {
+    return normalized.includes('2.5') || normalized.includes('25');
+  }
+  return false;
+}
+
+function isUnder25Label(value) {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+  if (normalized.includes('under') || normalized.includes('menos de')) {
+    return normalized.includes('2.5') || normalized.includes('25');
+  }
+  return false;
+}
+
 function probabilityFromOdd(odd) {
   const value = Number(odd);
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -217,19 +254,21 @@ function analyzeMatches(matches, logger) {
     }
 
     for (const value of markets.get('Match Winner') || []) {
-      if (value.value === 'Home') entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
-      if (value.value === 'Draw') entry.predictions.drawProbability = probabilityFromOdd(value.odd);
-      if (value.value === 'Away') entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
+      const normalized = normalizeMarketValue(value.value);
+      if (HOME_LABELS.has(normalized)) entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
+      if (DRAW_LABELS.has(normalized)) entry.predictions.drawProbability = probabilityFromOdd(value.odd);
+      if (AWAY_LABELS.has(normalized)) entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
     }
 
     for (const value of markets.get('Goals Over/Under') || []) {
-      if (value.value === 'Over 2.5') entry.predictions.over25Probability = probabilityFromOdd(value.odd);
-      if (value.value === 'Under 2.5') entry.predictions.under25Probability = probabilityFromOdd(value.odd);
+      if (isOver25Label(value.value)) entry.predictions.over25Probability = probabilityFromOdd(value.odd);
+      if (isUnder25Label(value.value)) entry.predictions.under25Probability = probabilityFromOdd(value.odd);
     }
 
     for (const value of markets.get('Both Teams Score') || []) {
-      if (value.value === 'Yes') entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
-      if (value.value === 'No') entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
+      const normalized = normalizeMarketValue(value.value);
+      if (YES_LABELS.has(normalized)) entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
+      if (NO_LABELS.has(normalized)) entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
     }
 
     const recommendations = [];
