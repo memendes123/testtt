@@ -61,6 +61,9 @@ def format_predictions_message(match_data: Dict[str, object], analysis: Dict[str
                         away=predictions.get("awayWinProbability", 0),
                     )
                 )
+            notes = match.get("analysisNotes") or []
+            if notes:
+                message_lines.append(f"📝 PK: {' • '.join(notes[:2])}")
             message_lines.append("")
     else:
         message_lines.append("😔 <b>Não há jogos com odds interessantes hoje.</b>")

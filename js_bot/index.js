@@ -96,6 +96,218 @@ async function fetchJson(url, params, headers, timeout = 30000) {
   return response.json();
 }
 
+function extractScore(fixture) {
+  const goals = fixture.goals ?? {};
+  const score = fixture.score ?? {};
+  const fullTime = score.fulltime ?? {};
+  const extra = score.extratime ?? {};
+  const penalties = score.penalty ?? {};
+
+  const homeGoals = goals.home ?? fullTime.home ?? extra.home ?? penalties.home ?? 0;
+  const awayGoals = goals.away ?? fullTime.away ?? extra.away ?? penalties.away ?? 0;
+
+  return { homeGoals: Number(homeGoals) || 0, awayGoals: Number(awayGoals) || 0 };
+}
+
+function summarizeTeamFixtures(teamId, fixtures = []) {
+  if (!teamId || !Array.isArray(fixtures) || fixtures.length === 0) {
+    return null;
+  }
+
+  const ordered = [...fixtures].sort((a, b) => (b.fixture?.timestamp || 0) - (a.fixture?.timestamp || 0));
+  const matches = [];
+  let wins = 0;
+  let draws = 0;
+  let losses = 0;
+  let goalsFor = 0;
+  let goalsAgainst = 0;
+  let cleanSheets = 0;
+  let failedToScore = 0;
+
+  for (const fixture of ordered) {
+    const { homeGoals, awayGoals } = extractScore(fixture);
+    const isHome = fixture.teams?.home?.id === teamId;
+    const opponent = isHome ? fixture.teams?.away : fixture.teams?.home;
+    const goalsForMatch = isHome ? homeGoals : awayGoals;
+    const goalsAgainstMatch = isHome ? awayGoals : homeGoals;
+
+    let winner = null;
+    if (fixture.teams?.home?.winner === true && fixture.teams?.away?.winner === false) {
+      winner = 'home';
+    } else if (fixture.teams?.home?.winner === false && fixture.teams?.away?.winner === true) {
+      winner = 'away';
+    } else if (homeGoals > awayGoals) {
+      winner = 'home';
+    } else if (awayGoals > homeGoals) {
+      winner = 'away';
+    } else {
+      winner = 'draw';
+    }
+
+    const resultCode =
+      winner === 'draw' ? 'E' : winner === (isHome ? 'home' : 'away') ? 'V' : 'D';
+
+    matches.push({
+      fixtureId: fixture.fixture?.id,
+      date: fixture.fixture?.date,
+      opponent: opponent?.name,
+      competition: fixture.league?.name,
+      score: `${homeGoals}-${awayGoals}`,
+      result: resultCode,
+    });
+
+    goalsFor += goalsForMatch;
+    goalsAgainst += goalsAgainstMatch;
+
+    if (resultCode === 'V') wins += 1;
+    else if (resultCode === 'E') draws += 1;
+    else losses += 1;
+
+    if (goalsAgainstMatch === 0) cleanSheets += 1;
+    if (goalsForMatch === 0) failedToScore += 1;
+  }
+
+  const total = matches.length;
+  if (total === 0) return null;
+
+  const recentRecord = matches.map((match) => match.result).join('');
+  const firstResult = matches[0]?.result ?? 'E';
+  let streakCount = 0;
+  for (const match of matches) {
+    if (match.result === firstResult) streakCount += 1;
+    else break;
+  }
+
+  const streakType =
+    firstResult === 'V' ? 'win' : firstResult === 'D' ? 'loss' : firstResult === 'E' ? 'draw' : 'unknown';
+
+  const avgGoalsFor = Number((goalsFor / total).toFixed(2));
+  const avgGoalsAgainst = Number((goalsAgainst / total).toFixed(2));
+
+  return {
+    sampleSize: total,
+    matches,
+    wins,
+    draws,
+    losses,
+    winRate: total ? wins / total : 0,
+    drawRate: total ? draws / total : 0,
+    lossRate: total ? losses / total : 0,
+    formPoints: wins * 3 + draws,
+    avgGoalsFor,
+    avgGoalsAgainst,
+    avgGoalsTotal: Number(((goalsFor + goalsAgainst) / total).toFixed(2)),
+    goalDifferenceAvg: Number((avgGoalsFor - avgGoalsAgainst).toFixed(2)),
+    cleanSheets,
+    failedToScore,
+    recentRecord,
+    currentStreak: { type: streakType, count: streakCount },
+  };
+}
+
+function summarizeHeadToHead(homeId, awayId, fixtures = []) {
+  if (!homeId || !awayId || fixtures.length === 0) {
+    return null;
+  }
+
+  const ordered = [...fixtures].sort((a, b) => (b.fixture?.timestamp || 0) - (a.fixture?.timestamp || 0));
+  const matches = [];
+  let homeWins = 0;
+  let awayWins = 0;
+  let draws = 0;
+  let totalGoals = 0;
+
+  for (const fixture of ordered) {
+    const { homeGoals, awayGoals } = extractScore(fixture);
+    const fixtureHomeId = fixture.teams?.home?.id;
+    const fixtureAwayId = fixture.teams?.away?.id;
+    const upcomingHomeWasHome = fixtureHomeId === homeId;
+
+    let result = 'E';
+    if (homeGoals !== awayGoals) {
+      const didHomeWin = fixture.teams?.home?.winner ?? homeGoals > awayGoals;
+      const upcomingHomeWon = upcomingHomeWasHome ? didHomeWin : !(didHomeWin);
+      if (upcomingHomeWon) {
+        result = 'V';
+        homeWins += 1;
+      } else {
+        result = 'D';
+        awayWins += 1;
+      }
+    } else {
+      draws += 1;
+    }
+
+    matches.push({
+      fixtureId: fixture.fixture?.id,
+      date: fixture.fixture?.date,
+      venue: fixture.fixture?.venue?.name,
+      score: `${homeGoals}-${awayGoals}`,
+      result,
+    });
+
+    totalGoals += homeGoals + awayGoals;
+  }
+
+  const sampleSize = matches.length;
+  if (sampleSize === 0) return null;
+
+  return {
+    sampleSize,
+    matches,
+    homeWins,
+    awayWins,
+    draws,
+    avgGoalsTotal: Number((totalGoals / sampleSize).toFixed(2)),
+  };
+}
+
+const teamFormCache = new Map();
+const headToHeadCache = new Map();
+
+async function fetchTeamForm(teamId, headers, logger) {
+  if (!teamId) return null;
+  if (teamFormCache.has(teamId)) return teamFormCache.get(teamId);
+
+  try {
+    const payload = await fetchJson(
+      'https://v3.football.api-sports.io/fixtures',
+      { team: teamId, last: 5 },
+      headers,
+    );
+    const fixtures = payload.response || [];
+    const summary = summarizeTeamFixtures(teamId, fixtures);
+    teamFormCache.set(teamId, summary);
+    return summary;
+  } catch (error) {
+    logger.warn(`Failed to fetch form for team ${teamId}: ${error.message}`);
+    teamFormCache.set(teamId, null);
+    return null;
+  }
+}
+
+async function fetchHeadToHead(homeId, awayId, headers, logger) {
+  if (!homeId || !awayId) return null;
+  const key = `${homeId}-${awayId}`;
+  if (headToHeadCache.has(key)) return headToHeadCache.get(key);
+
+  try {
+    const payload = await fetchJson(
+      'https://v3.football.api-sports.io/fixtures/headtohead',
+      { h2h: `${homeId}-${awayId}`, last: 5 },
+      headers,
+    );
+    const fixtures = payload.response || [];
+    const summary = summarizeHeadToHead(homeId, awayId, fixtures);
+    headToHeadCache.set(key, summary);
+    return summary;
+  } catch (error) {
+    logger.warn(`Failed to fetch head-to-head for ${homeId}-${awayId}: ${error.message}`);
+    headToHeadCache.set(key, null);
+    return null;
+  }
+}
+
 async function fetchMatches(date, settings, logger) {
   const headers = {
     'X-RapidAPI-Key': settings.footballApiKey,
@@ -137,6 +349,15 @@ async function fetchMatches(date, settings, logger) {
       logger.warn(`Failed to fetch odds for fixture ${fixtureId}: ${error.message}`);
     }
 
+    const homeTeamId = fixture.teams?.home?.id;
+    const awayTeamId = fixture.teams?.away?.id;
+
+    const [homeForm, awayForm, headToHead] = await Promise.all([
+      fetchTeamForm(homeTeamId, headers, logger),
+      fetchTeamForm(awayTeamId, headers, logger),
+      fetchHeadToHead(homeTeamId, awayTeamId, headers, logger),
+    ]);
+
     let time = '';
     if (fixture.fixture?.date) {
       try {
@@ -164,6 +385,11 @@ async function fetchMatches(date, settings, logger) {
       teams: fixture.teams,
       venue: fixture.fixture?.venue?.name ?? 'TBD',
       odds,
+      form: {
+        home: homeForm,
+        away: awayForm,
+        headToHead,
+      },
     });
 
     regionCounters[competition.region] = (regionCounters[competition.region] || 0) + 1;
@@ -185,6 +411,43 @@ async function fetchMatches(date, settings, logger) {
       })),
     },
   };
+}
+
+function normalizeMarketValue(value) {
+  if (value === undefined || value === null) return '';
+  return value
+    .toString()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[,]/g, '.')
+    .replace(/[()]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+const HOME_LABELS = new Set(['home', '1', 'home team', 'team 1', '1 home']);
+const DRAW_LABELS = new Set(['draw', 'x', 'empate']);
+const AWAY_LABELS = new Set(['away', '2', 'away team', 'team 2', '2 away']);
+const YES_LABELS = new Set(['yes', 'sim', 'y', 's']);
+const NO_LABELS = new Set(['no', 'nao', 'n']);
+
+function isOver25Label(value) {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+  if (normalized.includes('over') || normalized.includes('mais de')) {
+    return normalized.includes('2.5') || normalized.includes('25');
+  }
+  return false;
+}
+
+function isUnder25Label(value) {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+  if (normalized.includes('under') || normalized.includes('menos de')) {
+    return normalized.includes('2.5') || normalized.includes('25');
+  }
+  return false;
 }
 
 function probabilityFromOdd(odd) {
@@ -209,6 +472,7 @@ function analyzeMatches(matches, logger) {
       },
       recommendedBets: [],
       confidence: 'low',
+      analysisNotes: [],
     };
 
     const markets = new Map();
@@ -217,19 +481,21 @@ function analyzeMatches(matches, logger) {
     }
 
     for (const value of markets.get('Match Winner') || []) {
-      if (value.value === 'Home') entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
-      if (value.value === 'Draw') entry.predictions.drawProbability = probabilityFromOdd(value.odd);
-      if (value.value === 'Away') entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
+      const normalized = normalizeMarketValue(value.value);
+      if (HOME_LABELS.has(normalized)) entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
+      if (DRAW_LABELS.has(normalized)) entry.predictions.drawProbability = probabilityFromOdd(value.odd);
+      if (AWAY_LABELS.has(normalized)) entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
     }
 
     for (const value of markets.get('Goals Over/Under') || []) {
-      if (value.value === 'Over 2.5') entry.predictions.over25Probability = probabilityFromOdd(value.odd);
-      if (value.value === 'Under 2.5') entry.predictions.under25Probability = probabilityFromOdd(value.odd);
+      if (isOver25Label(value.value)) entry.predictions.over25Probability = probabilityFromOdd(value.odd);
+      if (isUnder25Label(value.value)) entry.predictions.under25Probability = probabilityFromOdd(value.odd);
     }
 
     for (const value of markets.get('Both Teams Score') || []) {
-      if (value.value === 'Yes') entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
-      if (value.value === 'No') entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
+      const normalized = normalizeMarketValue(value.value);
+      if (YES_LABELS.has(normalized)) entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
+      if (NO_LABELS.has(normalized)) entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
     }
 
     const recommendations = [];
@@ -270,6 +536,72 @@ function analyzeMatches(matches, logger) {
     } else if (entry.predictions.bttsNoProbability >= 60) {
       recommendations.push(`🚫 Ambos marcam: NÃO (${entry.predictions.bttsNoProbability}%)`);
       confidenceScore += 1;
+    }
+
+    const notes = [];
+    let qualitativeBoost = 0;
+    const homeForm = match.form?.home;
+    const awayForm = match.form?.away;
+    const headToHead = match.form?.headToHead;
+
+    if (homeForm?.currentStreak?.type === 'win' && homeForm.currentStreak.count >= 3) {
+      notes.push(
+        `Casa com ${homeForm.currentStreak.count} vitórias seguidas (${homeForm.recentRecord.slice(0, 5)})`,
+      );
+      qualitativeBoost += 1;
+    }
+
+    if (awayForm?.currentStreak?.type === 'loss' && awayForm.currentStreak.count >= 2) {
+      notes.push(`Visitante sem vencer há ${awayForm.currentStreak.count} jogos (${awayForm.recentRecord.slice(0, 5)})`);
+      qualitativeBoost += 1;
+    }
+
+    if ((homeForm?.avgGoalsFor ?? 0) + (awayForm?.avgGoalsFor ?? 0) >= 3.2) {
+      notes.push('Tendência de muitos golos (médias ofensivas altas nas últimas partidas)');
+    } else if ((homeForm?.avgGoalsFor ?? 0) + (awayForm?.avgGoalsFor ?? 0) <= 2.0) {
+      notes.push('Tendência de poucos golos nos últimos jogos das equipas');
+    }
+
+    if (headToHead?.homeWins && headToHead.homeWins >= 3) {
+      notes.push('Histórico recente favorável ao mandante no confronto direto');
+      qualitativeBoost += 1;
+    }
+
+    if (headToHead?.avgGoalsTotal && headToHead.avgGoalsTotal >= 3) {
+      notes.push('Confrontos diretos recentes com média superior a 3 golos');
+    }
+
+    entry.analysisNotes = notes.slice(0, 3);
+
+    confidenceScore += qualitativeBoost;
+
+    if (
+      entry.predictions.homeWinProbability === 0 &&
+      entry.predictions.awayWinProbability === 0 &&
+      entry.predictions.drawProbability === 0 &&
+      (homeForm || awayForm)
+    ) {
+      const formCount = (homeForm ? 1 : 0) + (awayForm ? 1 : 0) || 1;
+      const drawRate = ((homeForm?.drawRate ?? 0) + (awayForm?.drawRate ?? 0)) / formCount;
+      const drawProbability = Math.round(Math.min(drawRate, 0.45) * 100);
+      const homeScore =
+        (homeForm?.winRate ?? 0) + (awayForm ? awayForm.lossRate * 0.6 : 0) + Math.max(homeForm?.goalDifferenceAvg ?? 0, 0);
+      const awayScore =
+        (awayForm?.winRate ?? 0) + (homeForm ? homeForm.lossRate * 0.6 : 0) + Math.max(awayForm?.goalDifferenceAvg ?? 0, 0);
+      const total = homeScore + awayScore;
+      const available = Math.max(0, 100 - drawProbability);
+      if (total > 0) {
+        entry.predictions.homeWinProbability = Math.round((homeScore / total) * available);
+        entry.predictions.awayWinProbability = Math.max(
+          0,
+          available - entry.predictions.homeWinProbability,
+        );
+        entry.predictions.drawProbability = drawProbability;
+      } else {
+        entry.predictions.homeWinProbability = Math.round(available / 2);
+        entry.predictions.awayWinProbability = available - entry.predictions.homeWinProbability;
+        entry.predictions.drawProbability = drawProbability;
+      }
     }
 
     entry.recommendedBets = recommendations;
@@ -370,6 +702,9 @@ function buildMessage(matchData, analysis) {
       lines.push(
         `📈 Prob: Casa ${predictions.homeWinProbability}% | Empate ${predictions.drawProbability}% | Fora ${predictions.awayWinProbability}%`,
       );
+      if (match.analysisNotes?.length) {
+        lines.push(`📝 PK: ${match.analysisNotes.slice(0, 2).join(' • ')}`);
+      }
       lines.push('');
     }
   } else {
