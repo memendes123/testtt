@@ -619,6 +619,36 @@ function isUnder25Label(value) {
   return false;
 }
 
+function normalizeOdd(odd) {
+  if (odd === null || odd === undefined) return null;
+  if (typeof odd === 'number') return odd > 0 ? odd : null;
+
+  const text = String(odd).trim();
+  if (!text) return null;
+
+  const lowered = text.toLowerCase();
+
+  if (lowered.includes('/')) {
+    const parts = lowered.split('/');
+    if (parts.length === 2) {
+      const numerator = Number.parseFloat(parts[0].trim().replace(/,/g, '.'));
+      const denominator = Number.parseFloat(parts[1].trim().replace(/,/g, '.'));
+      if (Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0) {
+        const decimalValue = 1 + numerator / denominator;
+        return decimalValue > 0 ? decimalValue : null;
+      }
+    }
+  }
+
+  const cleaned = lowered.replace(/,/g, '.');
+  const match = cleaned.match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+
+  const value = Number.parseFloat(match[0]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
 function probabilityFromOdd(odd) {
   const value = normalizeOdd(odd);
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -692,22 +722,6 @@ function analyzeMatches(matches, logger) {
       applyForebet('under25Probability', 'under25Probability');
       applyForebet('bttsYesProbability', 'bttsYesProbability');
       applyForebet('bttsNoProbability', 'bttsNoProbability');
-    for (const value of markets.get('Match Winner') || []) {
-      const normalized = normalizeMarketValue(value.value);
-      if (HOME_LABELS.has(normalized)) entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
-      if (DRAW_LABELS.has(normalized)) entry.predictions.drawProbability = probabilityFromOdd(value.odd);
-      if (AWAY_LABELS.has(normalized)) entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
-    }
-
-    for (const value of markets.get('Goals Over/Under') || []) {
-      if (isOver25Label(value.value)) entry.predictions.over25Probability = probabilityFromOdd(value.odd);
-      if (isUnder25Label(value.value)) entry.predictions.under25Probability = probabilityFromOdd(value.odd);
-    }
-
-    for (const value of markets.get('Both Teams Score') || []) {
-      const normalized = normalizeMarketValue(value.value);
-      if (YES_LABELS.has(normalized)) entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
-      if (NO_LABELS.has(normalized)) entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
     }
 
     const recommendations = [];
