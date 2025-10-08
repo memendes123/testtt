@@ -8,9 +8,9 @@ import requests
 
 
 class ChatGPTClient:
-    """Simple wrapper around the OpenAI Responses API (GPT-4.1 family by default)."""
+    """Simple wrapper around the OpenAI Responses API (GPT-5 family by default)."""
 
-    def __init__(self, api_key: Optional[str], model: str = "gpt-4.1-mini", logger: Optional[logging.Logger] = None) -> None:
+    def __init__(self, api_key: Optional[str], model: str = "gpt-5.0", logger: Optional[logging.Logger] = None) -> None:
         self.api_key = api_key
         self.model = model
         self.logger = logger or logging.getLogger(__name__)
@@ -20,6 +20,9 @@ class ChatGPTClient:
 
     def summarize_match(self, context: Dict[str, Any]) -> Optional[str]:
         if not self.is_configured():
+            self.logger.debug(
+                "OpenAI client not configured", extra={"hasKey": bool(self.api_key), "model": self.model or ""}
+            )
             return None
 
         headers = {
