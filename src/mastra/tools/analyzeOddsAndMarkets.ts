@@ -109,6 +109,79 @@ const isUnder25Label = (value: unknown): boolean => {
   return false;
 };
 
+const normalizeMarketValue = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return value
+    .toString()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[,]/g, ".")
+    .replace(/[()]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+};
+
+const HOME_LABELS = new Set([
+  "home",
+  "1",
+  "home team",
+  "team 1",
+  "1 home",
+]);
+
+const DRAW_LABELS = new Set([
+  "draw",
+  "x",
+  "empate",
+]);
+
+const AWAY_LABELS = new Set([
+  "away",
+  "2",
+  "away team",
+  "team 2",
+  "2 away",
+]);
+
+const YES_LABELS = new Set([
+  "yes",
+  "sim",
+  "y",
+  "s",
+]);
+
+const NO_LABELS = new Set([
+  "no",
+  "nao",
+  "n",
+]);
+
+const isOver25Label = (value: unknown): boolean => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+
+  if (normalized.includes("over") || normalized.includes("mais de")) {
+    return normalized.includes("2.5") || normalized.includes("25");
+  }
+
+  return false;
+};
+
+const isUnder25Label = (value: unknown): boolean => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+
+  if (normalized.includes("under") || normalized.includes("menos de")) {
+    return normalized.includes("2.5") || normalized.includes("25");
+  }
+
+  return false;
+};
+
 const analyzeMatchOdds = ({
   matches,
   logger,
