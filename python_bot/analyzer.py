@@ -502,13 +502,15 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             {
                 "region": region,
                 "label": index.region_label.get(region, region),
-                "matches": ordered[:5],
+                "matches": ordered,
+                "topMatches": ordered[:5],
             }
         )
 
     return {
         "totalAnalyzed": len(analyzed),
         "bestMatches": sorted_matches[:10],
+        "allMatches": sorted_matches,
         "highConfidenceCount": sum(1 for match in sorted_matches if match.get("confidence") == "high"),
         "mediumConfidenceCount": sum(1 for match in sorted_matches if match.get("confidence") == "medium"),
         "breakdownByRegion": breakdown,

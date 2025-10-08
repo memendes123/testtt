@@ -24,6 +24,7 @@ const RegionMatches = z.object({
   region: RegionEnum,
   label: z.string(),
   matches: z.array(z.any()),
+  topMatches: z.array(z.any()),
 });
 
 const MatchData = z.object({
@@ -52,6 +53,7 @@ const AnalysisResult = z.object({
   analysis: z.object({
     totalAnalyzed: z.number(),
     bestMatches: z.array(z.any()),
+    allMatches: z.array(z.any()),
     highConfidenceCount: z.number(),
     mediumConfidenceCount: z.number(),
     breakdownByRegion: z.array(RegionBreakdown),
@@ -158,99 +160,149 @@ const sendPredictionsStep = createStep({
       day: 'numeric'
     });
 
-    let message = `🏆 <b>PREVISÕES FUTEBOL - ${date.toUpperCase()}</b>\n\n`;
-    message += `📊 <b>Resumo Global:</b>\n`;
-    message += `• ${originalData.totalMatches} jogos elegíveis nas competições suportadas\n`;
-    message += `• ${analysis.totalAnalyzed} jogos com odds válidas analisados\n`;
-    message += `• ${analysis.highConfidenceCount} jogos de alta confiança | ${analysis.mediumConfidenceCount} de média confiança\n\n`;
+    const escapeHtml = (value: unknown) =>
+      value === null || value === undefined
+        ? ''
+        : String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const confidenceLabel = (confidence?: string | null) => {
+      if (confidence === 'high') return '🔥 Alta';
+      if (confidence === 'medium') return '⚡ Média';
+      if (confidence === 'low') return '💡 Baixa';
+      return confidence ? escapeHtml(confidence) : null;
+    };
+
+    const formatProbabilities = (predictions: any) => {
+      const lines: string[] = [];
+      if (!predictions) return lines;
+      const home = Number(predictions.homeWinProbability || 0);
+      const draw = Number(predictions.drawProbability || 0);
+      const away = Number(predictions.awayWinProbability || 0);
+      if (home || draw || away) {
+        lines.push(`↳ 📈 1X2: Casa ${home}% | Empate ${draw}% | Fora ${away}%`);
+      }
+      const over25 = Number(predictions.over25Probability || 0);
+      const under25 = Number(predictions.under25Probability || 0);
+      if (over25 || under25) {
+        lines.push(`↳ ⚽ Linhas 2.5: Over ${over25}% | Under ${under25}%`);
+      }
+      const bttsYes = Number(predictions.bttsYesProbability || 0);
+      const bttsNo = Number(predictions.bttsNoProbability || 0);
+      if (bttsYes || bttsNo) {
+        lines.push(`↳ 🤝 Ambos marcam: Sim ${bttsYes}% | Não ${bttsNo}%`);
+      }
+      return lines;
+    };
+
+    const escapeJoin = (values: unknown[], separator = ' | ') =>
+      values
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => escapeHtml(String(value)))
+        .join(separator);
+
+    const formatMatchDetails = (match: any, prefix: string) => {
+      const teams = match.teams || {};
+      const home = escapeHtml(teams.home?.name || 'Casa');
+      const away = escapeHtml(teams.away?.name || 'Fora');
+      const competitionLabel = match.competition?.name || match.league?.name || '';
+      const timeLabel = match.time ? `(${escapeHtml(match.time)})` : '';
+
+      const header = [prefix, `<b>${home} vs ${away}</b>`, timeLabel, competitionLabel ? `— ${escapeHtml(competitionLabel)}` : '']
+        .filter(Boolean)
+        .join(' ');
+
+      const lines: string[] = [header];
+      const confidence = confidenceLabel(match.confidence);
+      if (confidence) {
+        lines.push(`↳ Confiança: ${confidence}`);
+      }
+      if (match.recommendedBets?.length) {
+        lines.push(`↳ 🎯 ${escapeJoin(match.recommendedBets)}`);
+      }
+      lines.push(...formatProbabilities(match.predictions));
+      if (match.analysisNotes?.length) {
+        lines.push(`↳ 📝 ${escapeJoin(match.analysisNotes.slice(0, 2), ' • ')}`);
+      }
+      return lines;
+    };
+
+    const date = new Date(originalData.date).toLocaleDateString('pt-PT', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+
+    const lines: string[] = [];
+    lines.push(`🏆 <b>PREVISÕES FUTEBOL - ${date}</b>`, '');
+    lines.push('📊 <b>Resumo Global:</b>');
+    lines.push(`• ${originalData.totalMatches} jogos elegíveis nas competições suportadas`);
+    lines.push(`• ${analysis.totalAnalyzed} jogos com odds válidas analisados`);
+    lines.push(`• ${analysis.highConfidenceCount} jogos de alta confiança | ${analysis.mediumConfidenceCount} de média confiança`, '');
 
     const activeRegions = analysis.breakdownByRegion.filter((region) => region.total > 0);
-    if (activeRegions.length > 0) {
-      message += `🌍 <b>Distribuição por Região:</b>\n`;
+    if (activeRegions.length) {
+      lines.push('🌍 <b>Distribuição por Região:</b>');
       activeRegions.forEach((region) => {
-        message += `• ${region.label}: ${region.total} jogos (${region.highConfidence} alta | ${region.mediumConfidence} média)\n`;
+        lines.push(`• ${escapeHtml(region.label)}: ${region.total} jogos (${region.highConfidence} alta | ${region.mediumConfidence} média)`);
       });
-      message += `\n`;
+      lines.push('');
     }
 
-    const globalHighlights = analysis.bestMatches.slice(0, Math.min(5, analysis.bestMatches.length));
-    if (globalHighlights.length > 0) {
-      message += `🔥 <b>TOP GLOBAL (${globalHighlights.length})</b>\n`;
-      globalHighlights.forEach((match: any, index: number) => {
-        const confidenceEmoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
-        const competitionLabel = match.competition ? `${match.competition.name} • ${match.competition.country}` : match.league.name;
-        message += `${confidenceEmoji} <b>${match.teams.home.name} vs ${match.teams.away.name}</b> — ${competitionLabel}\n`;
-        message += `⏰ ${match.time} | 🏆 ${match.league.name}\n`;
-        if (match.recommendedBets && match.recommendedBets.length > 0) {
-          message += `🎯 ${match.recommendedBets.join(' | ')}\n`;
+    const highlights = analysis.bestMatches.slice(0, Math.min(5, analysis.bestMatches.length));
+    if (highlights.length) {
+      lines.push(`🔥 <b>TOP GLOBAL (${highlights.length})</b>`);
+      highlights.forEach((match: any) => {
+        const emoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
+        const formattedLines = formatMatchDetails(match, emoji);
+        if (match.time) {
+          const league = match.competition?.name || match.league?.name || 'Horário a definir';
+          formattedLines.splice(1, 0, `↳ ⏰ ${escapeHtml(match.time)} | 🏆 ${escapeHtml(league)}`);
         }
-        if (match.predictions) {
-          message += `📈 Prob: Casa ${match.predictions.homeWinProbability}% | Empate ${match.predictions.drawProbability}% | Fora ${match.predictions.awayWinProbability}%\n`;
-        }
-        if (match.analysisNotes && match.analysisNotes.length > 0) {
-          message += `📝 PK: ${match.analysisNotes.slice(0, 2).join(' • ')}\n`;
-        }
-        message += `\n`;
+        lines.push(...formattedLines, '');
       });
-    }
-
-    if (analysis.bestMatches.length === 0) {
-      message += `😔 <b>Não há jogos com odds interessantes hoje.</b>\n`;
-      message += `Voltamos amanhã com mais análises!\n\n`;
-      message += `📈 Tip: Verifique os jogos ao vivo durante o dia para oportunidades em tempo real.`;
     } else {
-      const regionalHighlights = analysis.bestMatchesByRegion.filter((region) => region.matches.length > 0);
+      lines.push('😔 <b>Não há jogos com odds interessantes hoje.</b>');
+      lines.push('Voltamos amanhã com mais análises!', '');
+      lines.push('📈 Tip: Verifique os jogos ao vivo durante o dia para oportunidades em tempo real.');
+    }
 
-      if (regionalHighlights.length > 0) {
-        message += `🌎 <b>Destaques por Região</b>\n\n`;
-        regionalHighlights.forEach((region) => {
-          const matches = region.matches.slice(0, 3);
-          message += `🔹 <b>${region.label}</b> — ${matches.length} recomendações\n`;
-          matches.forEach((match: any) => {
-            const confidenceEmoji = match.confidence === 'high' ? '🔥' : match.confidence === 'medium' ? '⚡' : '💡';
-            const competitionLabel = match.competition ? `${match.competition.name} (${match.competition.type === 'cup' ? 'Taça' : match.competition.type === 'supercup' ? 'Supertaça' : 'Liga'})` : match.league.name;
-            message += `${confidenceEmoji} <b>${match.teams.home.name} vs ${match.teams.away.name}</b>\n`;
-            message += `🏟️ ${competitionLabel} | ⏰ ${match.time}\n`;
-
-            if (match.recommendedBets && match.recommendedBets.length > 0) {
-              message += `🎯 ${match.recommendedBets.join(' | ')}\n`;
-            }
-
-            if (match.predictions) {
-              const predictions = match.predictions;
-              message += `📈 Casa ${predictions.homeWinProbability}% | Empate ${predictions.drawProbability}% | Fora ${predictions.awayWinProbability}%\n`;
-              if (predictions.over25Probability > 0 || predictions.under25Probability > 0) {
-                message += `⚽ O/U 2.5: ${predictions.over25Probability}% / ${predictions.under25Probability}%\n`;
-              }
-              if (predictions.bttsYesProbability > 0 || predictions.bttsNoProbability > 0) {
-                message += `🥅 BTTS: Sim ${predictions.bttsYesProbability}% | Não ${predictions.bttsNoProbability}%\n`;
-              }
-            }
-            if (match.analysisNotes && match.analysisNotes.length > 0) {
-              message += `📝 PK: ${match.analysisNotes.slice(0, 2).join(' • ')}\n`;
-            }
-
-            message += `\n`;
-          });
+    const detailedRegions = analysis.bestMatchesByRegion.filter((region) => region.matches.length > 0);
+    if (detailedRegions.length) {
+      lines.push('🗺️ <b>Lista completa por região/competição:</b>');
+      detailedRegions.forEach((region) => {
+        lines.push(`📍 <b>${escapeHtml(region.label)}</b>`);
+        region.matches.forEach((match: any) => {
+          lines.push(...formatMatchDetails(match, '•'), '');
         });
+      });
+      if (lines[lines.length - 1] === '') {
+        lines.pop();
       }
     }
 
-    message += `\n💡 <b>Lembre-se:</b>\n`;
-    message += `• Aposte com responsabilidade\n`;
-    message += `• Nunca aposte mais do que pode perder\n`;
-    message += `• Estas são apenas previsões baseadas em probabilidades\n\n`;
-    message += `🔴 Lives: o bot monitoriza jogos em tempo real e envia alertas quentes via fluxo <i>live-betting</i>.\n`;
-    message += `⚽ Boa sorte com as suas apostas!\n`;
-    message += `🤖 Bot de Previsões Futebol`;
+    const message = lines.join('\n');
 
-    logger?.info("📝 [SendPredictionsStep] Message formatted", { 
-      messageLength: message.length 
+    const reminderLines = [
+      '',
+      '💡 <b>Lembre-se:</b>',
+      '• Aposte com responsabilidade',
+      '• Nunca aposte mais do que pode perder',
+      '• Estas são apenas previsões baseadas em probabilidades',
+      '',
+      '🔴 Lives: o bot monitoriza jogos em tempo real e envia alertas quentes via fluxo <i>live-betting</i>.',
+      '⚽ Boa sorte com as suas apostas!',
+      '🤖 Bot de Previsões Futebol'
+    ];
+
+    const finalMessage = `${message}\n${reminderLines.join('\n')}`;
+
+    logger?.info("📝 [SendPredictionsStep] Message formatted", {
+      messageLength: finalMessage.length
     });
 
     // Send the message
     const result = await sendTelegramMessageTool.execute({
-      context: { message },
+      context: { message: finalMessage },
       runtimeContext,
       mastra,
     });

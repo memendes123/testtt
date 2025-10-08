@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -210,24 +210,33 @@ def _summarize_head_to_head(home_id: Optional[int], away_id: Optional[int], fixt
 
 
 def fetch_matches(
-    date: datetime,
+    date: Optional[datetime],
     settings: Settings,
     index: CompetitionIndex,
     logger: Optional[logging.Logger] = None,
+    status: str = "NS",
 ) -> Dict[str, object]:
     """Fetch fixtures and odds for the given date."""
-    iso_date = date.strftime("%Y-%m-%d")
+    target_date = date or datetime.now(timezone.utc)
+    iso_date = target_date.strftime("%Y-%m-%d")
     headers = {
         "X-RapidAPI-Key": settings.football_api_key,
         "X-RapidAPI-Host": "v3.football.api-sports.io",
     }
 
     logger = logger or logging.getLogger(__name__)
-    logger.info("Fetching fixtures", extra={"date": iso_date})
+    normalized_status = (status or "NS").upper()
+    params: Dict[str, object]
+    if normalized_status == "LIVE":
+        params = {"live": "all"}
+        logger.info("Fetching live fixtures", extra={"status": normalized_status})
+    else:
+        params = {"date": iso_date, "status": normalized_status}
+        logger.info("Fetching fixtures", extra={"date": iso_date, "status": normalized_status})
 
     fixtures_response = requests.get(
         "https://v3.football.api-sports.io/fixtures",
-        params={"date": iso_date, "status": "NS"},
+        params=params,
         headers=headers,
         timeout=30,
     )
@@ -375,7 +384,7 @@ def fetch_matches(
         head_to_head = get_head_to_head(home_team.get("id"), away_team.get("id"))
 
         forebet_prediction = forebet_client.get_probabilities(
-            date,
+            target_date,
             home_team.get("name"),
             away_team.get("name"),
         )
@@ -422,6 +431,11 @@ def fetch_matches(
             "venue": fixture_info.get("venue", {}).get("name") or "TBD",
             "odds": odds_data,
             "forebet": forebet_data,
+            "status": fixture_info.get("status"),
+            "score": {
+                "home": (fixture.get("goals") or {}).get("home"),
+                "away": (fixture.get("goals") or {}).get("away"),
+            },
 
             "form": {
                 "home": home_form,

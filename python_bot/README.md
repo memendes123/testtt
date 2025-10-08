@@ -39,3 +39,28 @@ python -m python_bot.main --env .env
 Use `--date YYYY-MM-DD` to backfill a specific day, `--chat-id` to override the destination, and `--output` to export the raw JSON payload.
 
 The bot shares the competition metadata stored in `shared/competitions.json`, which is extracted directly from the TypeScript implementation.
+
+## Execução automática diária
+
+Uma rotina para enviar o relatório principal todos os dias às 00:10 está disponível no módulo `python_bot.scheduler`:
+
+```bash
+python -m python_bot.scheduler --env .env --timezone Europe/Lisbon --time 00:10
+```
+
+Argumentos úteis:
+
+- `--chat-id`: substitui o chat padrão configurado no `.env`.
+- `--run-immediately`: dispara uma execução assim que o script inicia, além do agendamento diário.
+- `--time HH:MM`: ajusta o horário alvo (padrão `00:10`).
+- `--timezone`: fuso IANA usado para calcular o horário local (padrão `UTC`).
+
+## Monitor de jogos ao vivo
+
+Para receber alertas em tempo real quando surgirem novas recomendações durante as partidas, utilize o módulo `python_bot.live_monitor`:
+
+```bash
+python -m python_bot.live_monitor --env .env --interval 180 --min-confidence medium
+```
+
+O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.

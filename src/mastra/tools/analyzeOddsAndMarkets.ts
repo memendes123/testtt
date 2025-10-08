@@ -215,7 +215,9 @@ const analyzeMatchOdds = ({
 }) => {
   logger?.info("🔧 [AnalyzeOddsAndMarkets] Starting analysis", { matchCount: matches.length });
 
-  const analyzedMatches: AnalyzedMatch[] = matches.map((match) => {
+  const analyzedMatches: AnalyzedMatch[] = [];
+
+  for (const match of matches) {
     logger?.info("📝 [AnalyzeOddsAndMarkets] Analyzing match", {
       homeTeam: match.teams.home.name,
       awayTeam: match.teams.away.name
@@ -241,7 +243,8 @@ const analyzeMatchOdds = ({
       logger?.warn("📝 [AnalyzeOddsAndMarkets] No odds available for match", {
         fixtureId: match.fixtureId
       });
-      return analysis;
+      analyzedMatches.push(analysis);
+      continue;
     }
 
     try {
@@ -257,17 +260,31 @@ const analyzeMatchOdds = ({
         }
       }
 
-      // Find different betting markets
       const matchWinnerBet = marketMap.get("match_winner");
       const overUnderBet = marketMap.get("goals_over_under");
       const bttsBet = marketMap.get("both_teams_score");
 
-      // Convert odds to probabilities (probability = 1 / decimal_odds)
-      if (matchWinnerBet) {
+      if (Array.isArray(matchWinnerBet)) {
         const homeEntry = matchWinnerBet.find((v: any) => HOME_LABELS.has(normalizeMarketValue(v.value)));
         const drawEntry = matchWinnerBet.find((v: any) => DRAW_LABELS.has(normalizeMarketValue(v.value)));
         const awayEntry = matchWinnerBet.find((v: any) => AWAY_LABELS.has(normalizeMarketValue(v.value)));
-      if (matchWinnerBet && matchWinnerBet.values) {
+
+        const homeOdd = parseFloat(homeEntry?.odd ?? "0");
+        const drawOdd = parseFloat(drawEntry?.odd ?? "0");
+        const awayOdd = parseFloat(awayEntry?.odd ?? "0");
+
+        if (homeOdd && homeOdd > 0) analysis.predictions.homeWinProbability = Math.round((1 / homeOdd) * 100);
+        if (drawOdd && drawOdd > 0) analysis.predictions.drawProbability = Math.round((1 / drawOdd) * 100);
+        if (awayOdd && awayOdd > 0) analysis.predictions.awayWinProbability = Math.round((1 / awayOdd) * 100);
+
+        logger?.info("📝 [AnalyzeOddsAndMarkets] 1X2 probabilities calculated", {
+          home: analysis.predictions.homeWinProbability,
+          draw: analysis.predictions.drawProbability,
+          away: analysis.predictions.awayWinProbability
+        });
+      }
+
+      if (matchWinnerBet && !Array.isArray(matchWinnerBet) && matchWinnerBet.values) {
         const homeEntry = matchWinnerBet.values.find((v: any) => HOME_LABELS.has(normalizeMarketValue(v.value)));
         const drawEntry = matchWinnerBet.values.find((v: any) => DRAW_LABELS.has(normalizeMarketValue(v.value)));
         const awayEntry = matchWinnerBet.values.find((v: any) => AWAY_LABELS.has(normalizeMarketValue(v.value)));
@@ -287,16 +304,9 @@ const analyzeMatchOdds = ({
         });
       }
 
-      // Over/Under 2.5 goals analysis
-      if (overUnderBet) {
+      if (Array.isArray(overUnderBet)) {
         const overEntry = overUnderBet.find((v: any) => isOver25Label(v.value));
         const underEntry = overUnderBet.find((v: any) => isUnder25Label(v.value));
-      if (overUnderBet && overUnderBet.values) {
-        const overEntry = overUnderBet.values.find((v: any) => isOver25Label(v.value));
-        const underEntry = overUnderBet.values.find((v: any) => isUnder25Label(v.value));
-
-        const over25Odd = parseFloat(overEntry?.odd ?? "0");
-        const under25Odd = parseFloat(underEntry?.odd ?? "0");
 
         const over25Odd = normalizeOdd(overEntry?.odd ?? null);
         const under25Odd = normalizeOdd(underEntry?.odd ?? null);
@@ -311,11 +321,42 @@ const analyzeMatchOdds = ({
         });
       }
 
-      // Both Teams to Score (BTTS) analysis
-      if (bttsBet) {
+      if (overUnderBet && !Array.isArray(overUnderBet) && overUnderBet.values) {
+        const overEntry = overUnderBet.values.find((v: any) => isOver25Label(v.value));
+        const underEntry = overUnderBet.values.find((v: any) => isUnder25Label(v.value));
+
+        const over25Odd = normalizeOdd(overEntry?.odd ?? null);
+        const under25Odd = normalizeOdd(underEntry?.odd ?? null);
+
+        if (over25Odd && over25Odd > 0) analysis.predictions.over25Probability = Math.round((1 / over25Odd) * 100);
+        if (under25Odd && under25Odd > 0)
+          analysis.predictions.under25Probability = Math.round((1 / under25Odd) * 100);
+
+        logger?.info("📝 [AnalyzeOddsAndMarkets] Over/Under 2.5 probabilities calculated", {
+          over25: analysis.predictions.over25Probability,
+          under25: analysis.predictions.under25Probability
+        });
+      }
+
+      if (Array.isArray(bttsBet)) {
         const yesEntry = bttsBet.find((v: any) => YES_LABELS.has(normalizeMarketValue(v.value)));
         const noEntry = bttsBet.find((v: any) => NO_LABELS.has(normalizeMarketValue(v.value)));
-      if (bttsBet && bttsBet.values) {
+
+        const bttsYesOdd = parseFloat(yesEntry?.odd ?? "0");
+        const bttsNoOdd = parseFloat(noEntry?.odd ?? "0");
+
+        if (bttsYesOdd && bttsYesOdd > 0)
+          analysis.predictions.bttsYesProbability = Math.round((1 / bttsYesOdd) * 100);
+        if (bttsNoOdd && bttsNoOdd > 0)
+          analysis.predictions.bttsNoProbability = Math.round((1 / bttsNoOdd) * 100);
+
+        logger?.info("📝 [AnalyzeOddsAndMarkets] BTTS probabilities calculated", {
+          bttsYes: analysis.predictions.bttsYesProbability,
+          bttsNo: analysis.predictions.bttsNoProbability
+        });
+      }
+
+      if (bttsBet && !Array.isArray(bttsBet) && bttsBet.values) {
         const yesEntry = bttsBet.values.find((v: any) => YES_LABELS.has(normalizeMarketValue(v.value)));
         const noEntry = bttsBet.values.find((v: any) => NO_LABELS.has(normalizeMarketValue(v.value)));
 
@@ -356,31 +397,28 @@ const analyzeMatchOdds = ({
         applyForebet("bttsNoProbability", "bttsNoProbability");
       }
 
-      // Generate recommendations based on probability analysis
-      const recommendations = [];
+      const recommendations = [] as string[];
       let totalConfidence = 0;
 
-      // Strong favorite (high probability)
       const maxProbability = Math.max(
         analysis.predictions.homeWinProbability,
         analysis.predictions.awayWinProbability
       );
-      
+
       if (maxProbability >= 70) {
-        const favoriteTeam = analysis.predictions.homeWinProbability > analysis.predictions.awayWinProbability 
-          ? match.teams.home.name 
+        const favoriteTeam = analysis.predictions.homeWinProbability > analysis.predictions.awayWinProbability
+          ? match.teams.home.name
           : match.teams.away.name;
         recommendations.push(`🏆 Forte favorito: ${favoriteTeam} (${maxProbability}%)`);
         totalConfidence += 3;
       } else if (maxProbability >= 55) {
-        const favoriteTeam = analysis.predictions.homeWinProbability > analysis.predictions.awayWinProbability 
-          ? match.teams.home.name 
+        const favoriteTeam = analysis.predictions.homeWinProbability > analysis.predictions.awayWinProbability
+          ? match.teams.home.name
           : match.teams.away.name;
         recommendations.push(`✅ Favorito: ${favoriteTeam} (${maxProbability}%)`);
         totalConfidence += 2;
       }
 
-      // Over/Under 2.5 recommendations
       if (analysis.predictions.over25Probability >= 60) {
         recommendations.push(`⚽ Over 2.5 golos (${analysis.predictions.over25Probability}%)`);
         totalConfidence += 2;
@@ -389,7 +427,6 @@ const analyzeMatchOdds = ({
         totalConfidence += 2;
       }
 
-      // BTTS recommendations
       if (analysis.predictions.bttsYesProbability >= 60) {
         recommendations.push(`🥅 Ambos marcam: SIM (${analysis.predictions.bttsYesProbability}%)`);
         totalConfidence += 1;
@@ -482,7 +519,6 @@ const analyzeMatchOdds = ({
       totalConfidence += qualitativeBoost;
       analysis.recommendedBets = recommendations;
 
-      // Determine overall confidence
       if (totalConfidence >= 5) {
         analysis.confidence = "high";
       } else if (totalConfidence >= 3) {
@@ -496,7 +532,6 @@ const analyzeMatchOdds = ({
         confidence: analysis.confidence,
         recommendationsCount: recommendations.length
       });
-
     } catch (error) {
       logger?.error("❌ [AnalyzeOddsAndMarkets] Error analyzing match", {
         error: error instanceof Error ? error.message : String(error),
@@ -504,8 +539,8 @@ const analyzeMatchOdds = ({
       });
     }
 
-    return analysis;
-  });
+    analyzedMatches.push(analysis);
+  }
 
   // Sort matches by confidence and probability strength
   const confidenceScore: Record<string, number> = { high: 3, medium: 2, low: 1 };
@@ -564,7 +599,8 @@ const analyzeMatchOdds = ({
     return {
       region,
       label: REGION_LABEL[region],
-      matches: sortedRegionMatches.slice(0, 5),
+      matches: sortedRegionMatches,
+      topMatches: sortedRegionMatches.slice(0, 5),
     };
   });
 
@@ -576,6 +612,7 @@ const analyzeMatchOdds = ({
   return {
     totalAnalyzed: analyzedMatches.length,
     bestMatches: sortedMatches.slice(0, 10), // Return top 10 best matches
+    allMatches: sortedMatches,
     highConfidenceCount: sortedMatches.filter(m => m.confidence === "high").length,
     mediumConfidenceCount: sortedMatches.filter(m => m.confidence === "medium").length,
     breakdownByRegion,
@@ -592,6 +629,7 @@ export const analyzeOddsAndMarketsTool = createTool({
   outputSchema: z.object({
     totalAnalyzed: z.number(),
     bestMatches: z.array(z.any()),
+    allMatches: z.array(z.any()),
     highConfidenceCount: z.number(),
     mediumConfidenceCount: z.number(),
     breakdownByRegion: z.array(
@@ -608,6 +646,7 @@ export const analyzeOddsAndMarketsTool = createTool({
         region: z.enum(COMPETITION_REGIONS),
         label: z.string(),
         matches: z.array(z.any()),
+        topMatches: z.array(z.any()),
       }),
     ),
   }),
