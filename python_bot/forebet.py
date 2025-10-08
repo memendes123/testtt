@@ -70,12 +70,30 @@ class ForebetClient:
         self._session = requests.Session()
         self._session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                ),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "Connection": "keep-alive",
+                "Referer": "https://www.forebet.com/en/football-predictions",
             }
         )
+        self._mobile_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Connection": "keep-alive",
+            "Referer": "https://m.forebet.com/en/football-predictions",
+        }
         self._cache: Dict[str, Dict[str, ForebetProbabilities]] = {}
         self._bs4_warning_emitted = False
         self._logger = logger or logging.getLogger(__name__)
@@ -91,12 +109,24 @@ class ForebetClient:
         url = FOREBET_URL_TEMPLATE.format(slug=slug)
         try:
             response = self._session.get(url, timeout=30)
-            if response.status_code != 200:
-                self._logger.warning(
-                    "Forebet request failed", extra={"url": url, "status": response.status_code}
-                )
-                return None
-            return response.text
+            if response.status_code == 200:
+                return response.text
+
+            if response.status_code == 403:
+                mobile_url = url.replace("www.forebet.com", "m.forebet.com")
+                mobile_response = self._session.get(mobile_url, headers=self._mobile_headers, timeout=30)
+                if mobile_response.status_code == 200:
+                    self._logger.info(
+                        "Forebet mobile fallback used successfully",
+                        extra={"url": mobile_url},
+                    )
+                    return mobile_response.text
+
+            self._logger.warning(
+                "Forebet request failed",
+                extra={"url": url, "status": response.status_code},
+            )
+            return None
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("Unable to fetch Forebet page", extra={"error": str(exc), "url": url})
             return None
