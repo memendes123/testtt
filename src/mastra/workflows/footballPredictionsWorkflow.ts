@@ -187,6 +187,9 @@ const sendPredictionsStep = createStep({
         if (match.predictions) {
           message += `📈 Prob: Casa ${match.predictions.homeWinProbability}% | Empate ${match.predictions.drawProbability}% | Fora ${match.predictions.awayWinProbability}%\n`;
         }
+        if (match.analysisNotes && match.analysisNotes.length > 0) {
+          message += `📝 PK: ${match.analysisNotes.slice(0, 2).join(' • ')}\n`;
+        }
         message += `\n`;
       });
     }
@@ -222,6 +225,9 @@ const sendPredictionsStep = createStep({
               if (predictions.bttsYesProbability > 0 || predictions.bttsNoProbability > 0) {
                 message += `🥅 BTTS: Sim ${predictions.bttsYesProbability}% | Não ${predictions.bttsNoProbability}%\n`;
               }
+            }
+            if (match.analysisNotes && match.analysisNotes.length > 0) {
+              message += `📝 PK: ${match.analysisNotes.slice(0, 2).join(' • ')}\n`;
             }
 
             message += `\n`;
