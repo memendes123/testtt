@@ -145,6 +145,7 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 ## 5. Como a análise funciona
 
 * **Conversão de odds em probabilidade:** cada odd decimal é convertida em percentual (`100 / odd`).
+* **Sinais externos (Forebet):** quando a API não devolve odds ou mercados completos, o bot tenta capturar as probabilidades 1X2/Over 2.5/BTTS disponibilizadas publicamente pela Forebet para preencher os buracos sem deixar valores zerados.
 * **Form vs. histórico:** quando uma casa de apostas não oferece odds para 1X2, usamos o desempenho recente (últimos 5 jogos) e o confronto direto para estimar probabilidades, evitando relatórios zerados.
 * **Notas chave (PK):** para cada destaque são listados até 2 “pontos-chave” baseados na forma das equipas (sequência de vitórias/derrotas, média de golos, confrontos diretos).
 * **Classificação de confiança:** partidas com probabilidades altas geram recomendações "Forte favorito" ou "Favorito". Mercados Over/Under e Ambos Marcam entram na lista caso ultrapassem 60%.

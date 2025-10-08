@@ -14,6 +14,41 @@ AWAY_LABELS = {"away", "2", "away team", "team 2", "2 away"}
 YES_LABELS = {"yes", "sim", "y", "s"}
 NO_LABELS = {"no", "nao", "n"}
 
+MARKET_ALIASES = {
+    "match_winner": {
+        "match winner",
+        "1x2",
+        "full time result",
+        "match result",
+        "result",
+        "win-draw-win",
+    },
+    "goals_over_under": {
+        "goals over/under",
+        "over/under",
+        "goals",
+        "goals o/u",
+        "total goals",
+    },
+    "both_teams_score": {
+        "both teams score",
+        "both teams to score",
+        "btts",
+        "gg/ng",
+        "goal goal",
+    },
+}
+
+
+def _normalize_market_name(value: Optional[object]) -> str:
+    normalized = _normalize_label(value)
+    if not normalized:
+        return ""
+    for canonical, aliases in MARKET_ALIASES.items():
+        if normalized in aliases:
+            return canonical
+    return normalized
+
 
 def _normalize_label(value: Optional[object]) -> str:
     if value is None:
@@ -85,11 +120,24 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             analyzed.append(entry)
             continue
 
-        market_lookup = {market.get("name"): market.get("values", []) for market in odds if isinstance(market, dict)}
+        market_lookup: Dict[str, List[Dict[str, object]]] = {}
+        for market in odds:
+            if not isinstance(market, dict):
+                continue
+            name = _normalize_market_name(market.get("name"))
+            if not name:
+                continue
+            if name not in market_lookup or not market_lookup[name]:
+                values = market.get("values")
+                if isinstance(values, list):
+                    market_lookup[name] = values
 
-        match_winner = market_lookup.get("Match Winner", [])
-        over_under = market_lookup.get("Goals Over/Under", [])
-        btts = market_lookup.get("Both Teams Score", [])
+        match_winner = market_lookup.get("match_winner", [])
+        over_under = market_lookup.get("goals_over_under", [])
+        btts = market_lookup.get("both_teams_score", [])
+
+        forebet = match.get("forebet") if isinstance(match, dict) else None
+        forebet_used = False
 
         predictions = entry["predictions"]
 
@@ -118,6 +166,28 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
                 predictions["bttsYesProbability"] = _calculate_probability(odd)
             elif label in NO_LABELS:
                 predictions["bttsNoProbability"] = _calculate_probability(odd)
+
+        if isinstance(forebet, dict):
+            def _apply_forebet(source_key: str, target_key: str) -> None:
+                nonlocal forebet_used
+                value = forebet.get(source_key)
+                if value is None:
+                    return
+                try:
+                    number = int(round(float(value)))
+                except (TypeError, ValueError):
+                    return
+                if predictions[target_key] == 0 and number > 0:
+                    predictions[target_key] = max(0, min(100, number))
+                    forebet_used = True
+
+            _apply_forebet("homeWinProbability", "homeWinProbability")
+            _apply_forebet("drawProbability", "drawProbability")
+            _apply_forebet("awayWinProbability", "awayWinProbability")
+            _apply_forebet("over25Probability", "over25Probability")
+            _apply_forebet("under25Probability", "under25Probability")
+            _apply_forebet("bttsYesProbability", "bttsYesProbability")
+            _apply_forebet("bttsNoProbability", "bttsNoProbability")
 
         recommendations: List[str] = []
         confidence_score = 0
@@ -195,6 +265,10 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             if float(head_to_head.get("avgGoalsTotal", 0.0) or 0.0) >= 3:
                 notes.append("Confrontos diretos recentes com média superior a 3 golos")
 
+        if forebet_used:
+            notes.append("Probabilidades 1X2 complementadas com dados da Forebet")
+
+
         draw_rate = (
             float(home_form.get("drawRate", 0.0)) if isinstance(home_form, dict) else 0.0
         ) + (
@@ -255,7 +329,15 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
     confidence_rank = {"high": 3, "medium": 2, "low": 1}
 
     def score(item: Dict[str, object]) -> int:
-        return confidence_rank.get(item.get("confidence", "low"), 0) * 10 + len(item.get("recommendedBets", []))
+        predictions = item.get("predictions", {}) if isinstance(item, dict) else {}
+        max_probability = max(
+            int((predictions or {}).get("homeWinProbability", 0) or 0),
+            int((predictions or {}).get("drawProbability", 0) or 0),
+            int((predictions or {}).get("awayWinProbability", 0) or 0),
+        )
+        confidence_component = confidence_rank.get(item.get("confidence", "low"), 0) * 1000
+        bet_component = len(item.get("recommendedBets", [])) * 10
+        return confidence_component + bet_component + max_probability
 
     sorted_matches = sorted(analyzed, key=score, reverse=True)
 

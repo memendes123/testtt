@@ -87,6 +87,30 @@ const NO_LABELS = new Set([
   "n",
 ]);
 
+const MARKET_ALIASES = new Map<string, Set<string>>([
+  [
+    "match_winner",
+    new Set(["match winner", "1x2", "full time result", "match result", "result", "win-draw-win"]),
+  ],
+  [
+    "goals_over_under",
+    new Set(["goals over/under", "over/under", "goals", "goals o/u", "total goals"]),
+  ],
+  [
+    "both_teams_score",
+    new Set(["both teams score", "both teams to score", "btts", "gg/ng", "goal goal"]),
+  ],
+]);
+
+const normalizeMarketName = (value: unknown): string => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return "";
+  for (const [key, aliases] of MARKET_ALIASES.entries()) {
+    if (aliases.has(normalized)) return key;
+  }
+  return normalized;
+};
+
 const isOver25Label = (value: unknown): boolean => {
   const normalized = normalizeMarketValue(value);
   if (!normalized) return false;
@@ -214,19 +238,35 @@ const analyzeMatchOdds = ({
     };
 
     if (!match.odds || match.odds.length === 0) {
-      logger?.warn("📝 [AnalyzeOddsAndMarkets] No odds available for match", { 
-        fixtureId: match.fixtureId 
+      logger?.warn("📝 [AnalyzeOddsAndMarkets] No odds available for match", {
+        fixtureId: match.fixtureId
       });
       return analysis;
     }
 
     try {
+      const marketMap = new Map<string, any[]>();
+      const forebet = match.forebet ?? null;
+      let forebetUsed = false;
+      for (const market of match.odds) {
+        const key = normalizeMarketName(market?.name);
+        if (!key) continue;
+        const values = Array.isArray(market?.values) ? market.values : [];
+        if (!marketMap.has(key) || !(marketMap.get(key)?.length > 0)) {
+          marketMap.set(key, values);
+        }
+      }
+
       // Find different betting markets
-      const matchWinnerBet = match.odds.find((bet: any) => bet.name === "Match Winner");
-      const overUnderBet = match.odds.find((bet: any) => bet.name === "Goals Over/Under");
-      const bttsBet = match.odds.find((bet: any) => bet.name === "Both Teams Score");
+      const matchWinnerBet = marketMap.get("match_winner");
+      const overUnderBet = marketMap.get("goals_over_under");
+      const bttsBet = marketMap.get("both_teams_score");
 
       // Convert odds to probabilities (probability = 1 / decimal_odds)
+      if (matchWinnerBet) {
+        const homeEntry = matchWinnerBet.find((v: any) => HOME_LABELS.has(normalizeMarketValue(v.value)));
+        const drawEntry = matchWinnerBet.find((v: any) => DRAW_LABELS.has(normalizeMarketValue(v.value)));
+        const awayEntry = matchWinnerBet.find((v: any) => AWAY_LABELS.has(normalizeMarketValue(v.value)));
       if (matchWinnerBet && matchWinnerBet.values) {
         const homeEntry = matchWinnerBet.values.find((v: any) => HOME_LABELS.has(normalizeMarketValue(v.value)));
         const drawEntry = matchWinnerBet.values.find((v: any) => DRAW_LABELS.has(normalizeMarketValue(v.value)));
@@ -248,6 +288,9 @@ const analyzeMatchOdds = ({
       }
 
       // Over/Under 2.5 goals analysis
+      if (overUnderBet) {
+        const overEntry = overUnderBet.find((v: any) => isOver25Label(v.value));
+        const underEntry = overUnderBet.find((v: any) => isUnder25Label(v.value));
       if (overUnderBet && overUnderBet.values) {
         const overEntry = overUnderBet.values.find((v: any) => isOver25Label(v.value));
         const underEntry = overUnderBet.values.find((v: any) => isUnder25Label(v.value));
@@ -265,6 +308,9 @@ const analyzeMatchOdds = ({
       }
 
       // Both Teams to Score (BTTS) analysis
+      if (bttsBet) {
+        const yesEntry = bttsBet.find((v: any) => YES_LABELS.has(normalizeMarketValue(v.value)));
+        const noEntry = bttsBet.find((v: any) => NO_LABELS.has(normalizeMarketValue(v.value)));
       if (bttsBet && bttsBet.values) {
         const yesEntry = bttsBet.values.find((v: any) => YES_LABELS.has(normalizeMarketValue(v.value)));
         const noEntry = bttsBet.values.find((v: any) => NO_LABELS.has(normalizeMarketValue(v.value)));
@@ -279,6 +325,29 @@ const analyzeMatchOdds = ({
           bttsYes: analysis.predictions.bttsYesProbability,
           bttsNo: analysis.predictions.bttsNoProbability
         });
+      }
+
+      if (forebet) {
+        const applyForebet = (
+          sourceKey: string,
+          targetKey: keyof typeof analysis.predictions,
+        ) => {
+          const current = analysis.predictions[targetKey];
+          if (current && current > 0) return;
+          const raw = Number(forebet[sourceKey as keyof typeof forebet]);
+          if (Number.isFinite(raw) && raw > 0) {
+            analysis.predictions[targetKey] = Math.max(0, Math.min(100, Math.round(raw)));
+            forebetUsed = true;
+          }
+        };
+
+        applyForebet("homeWinProbability", "homeWinProbability");
+        applyForebet("drawProbability", "drawProbability");
+        applyForebet("awayWinProbability", "awayWinProbability");
+        applyForebet("over25Probability", "over25Probability");
+        applyForebet("under25Probability", "under25Probability");
+        applyForebet("bttsYesProbability", "bttsYesProbability");
+        applyForebet("bttsNoProbability", "bttsNoProbability");
       }
 
       // Generate recommendations based on probability analysis
@@ -362,6 +431,10 @@ const analyzeMatchOdds = ({
         notes.push("Confrontos diretos recentes com média superior a 3 golos");
       }
 
+      if (forebetUsed) {
+        notes.push("Probabilidades 1X2 complementadas com dados da Forebet");
+      }
+
       analysis.analysisNotes = notes.slice(0, 3);
 
       const formCount = (homeForm ? 1 : 0) + (awayForm ? 1 : 0) || 1;
@@ -430,8 +503,19 @@ const analyzeMatchOdds = ({
 
   // Sort matches by confidence and probability strength
   const confidenceScore: Record<string, number> = { high: 3, medium: 2, low: 1 };
-  const computeScore = (match: AnalyzedMatch) =>
-    (confidenceScore[match.confidence] || 0) * 10 + (match.recommendedBets?.length || 0);
+  const computeScore = (match: AnalyzedMatch) => {
+    const predictions = match.predictions ?? {};
+    const maxProbability = Math.max(
+      Number(predictions.homeWinProbability ?? 0),
+      Number(predictions.drawProbability ?? 0),
+      Number(predictions.awayWinProbability ?? 0),
+    );
+    return (
+      (confidenceScore[match.confidence] || 0) * 1000 +
+      (match.recommendedBets?.length || 0) * 10 +
+      maxProbability
+    );
+  };
 
   const sortedMatches = analyzedMatches.sort((a, b) => computeScore(b) - computeScore(a));
 

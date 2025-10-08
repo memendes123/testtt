@@ -9,6 +9,7 @@ import requests
 from .competitions import CompetitionIndex
 from .config import Settings
 from .fetcher import _summarize_head_to_head, _summarize_team_form  # type: ignore
+from .forebet import ForebetClient
 
 API_BASE = "https://v3.football.api-sports.io"
 
@@ -127,12 +128,29 @@ def _fetch_odds(fixture_id: int, settings: Settings, logger: logging.Logger) -> 
     try:
         response = requests.get(
             f"{API_BASE}/odds",
+            params={"fixture": fixture_id},
             params={"fixture": fixture_id, "bookmaker": settings.bookmaker_id},
             headers=_headers(settings),
             timeout=30,
         )
         response.raise_for_status()
         payload = response.json()
+        response_items = payload.get("response") or []
+        bookmakers = []
+        if response_items:
+            first_item = response_items[0] or {}
+            bookmakers = first_item.get("bookmakers") or []
+
+        seen_markets: dict[str, list[dict[str, object]]] = {}
+        for bookmaker in bookmakers:
+            for bet in bookmaker.get("bets", []):
+                name = bet.get("name")
+                if not isinstance(name, str):
+                    continue
+                if name not in seen_markets or not seen_markets[name]:
+                    seen_markets[name] = bet.get("values") or []
+
+        return [{"name": market, "values": values} for market, values in seen_markets.items()]
         return payload["response"][0]["bookmakers"][0]["bets"]
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -199,6 +217,27 @@ def _build_match_entry(
         else None
     )
 
+    forebet_client = ForebetClient(logger=logger)
+    forebet_prediction = forebet_client.get_probabilities(
+        datetime.fromisoformat(fixture_info.get("date", "0").replace("Z", "+00:00")) if fixture_info.get("date") else datetime.utcnow(),
+        home.get("name"),
+        away.get("name"),
+    )
+
+    if forebet_prediction:
+        forebet_data = {
+            "source": "Forebet",
+            "homeWinProbability": forebet_prediction.home,
+            "drawProbability": forebet_prediction.draw,
+            "awayWinProbability": forebet_prediction.away,
+            "over25Probability": forebet_prediction.over25,
+            "under25Probability": forebet_prediction.under25,
+            "bttsYesProbability": forebet_prediction.btts_yes,
+            "bttsNoProbability": forebet_prediction.btts_no,
+        }
+    else:
+        forebet_data = None
+
     return {
         "fixtureId": fixture_id,
         "date": fixture_info.get("date"),
@@ -215,6 +254,7 @@ def _build_match_entry(
         },
         "venue": ((fixture_info.get("venue") or {}) or {}).get("name") or "TBD",
         "odds": odds,
+        "forebet": forebet_data,
         "form": {
             "home": home_form,
             "away": away_form,

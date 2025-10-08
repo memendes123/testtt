@@ -9,6 +9,7 @@ import requests
 
 from .competitions import CompetitionIndex
 from .config import Settings
+from .forebet import ForebetClient
 
 
 class FetchError(RuntimeError):
@@ -256,6 +257,8 @@ def fetch_matches(
 
     team_form_cache: Dict[int, Optional[Dict[str, object]]] = {}
     head_to_head_cache: Dict[Tuple[int, int], Optional[Dict[str, object]]] = {}
+    forebet_client = ForebetClient(logger=logger)
+
 
     def get_team_form(team_id: Optional[int]) -> Optional[Dict[str, object]]:
         if not team_id:
@@ -321,19 +324,34 @@ def fetch_matches(
         if not fixture_id:
             continue
 
-        odds_data = None
+        odds_data: List[Dict[str, object]] = []
         odds_response = requests.get(
             "https://v3.football.api-sports.io/odds",
-            params={"fixture": fixture_id, "bookmaker": settings.bookmaker_id},
+            params={"fixture": fixture_id},
             headers=headers,
             timeout=30,
         )
         if odds_response.status_code == 200:
             odds_payload = odds_response.json()
             try:
-                odds_data = odds_payload["response"][0]["bookmakers"][0]["bets"]
+                bookmakers = odds_payload["response"][0]["bookmakers"]
             except (KeyError, IndexError, TypeError):
-                odds_data = []
+                bookmakers = []
+
+            seen_markets: Dict[str, List[Dict[str, object]]] = {}
+            for bookmaker in bookmakers or []:
+                bets = bookmaker.get("bets") or []
+                for bet in bets:
+                    name = bet.get("name")
+                    if not isinstance(name, str):
+                        continue
+                    if name not in seen_markets or not seen_markets[name]:
+                        seen_markets[name] = bet.get("values") or []
+
+            odds_data = [
+                {"name": market_name, "values": values}
+                for market_name, values in seen_markets.items()
+            ]
         else:
             logger.warning(
                 "Failed to fetch odds",
@@ -355,6 +373,25 @@ def fetch_matches(
         home_form = get_team_form(home_team.get("id"))
         away_form = get_team_form(away_team.get("id"))
         head_to_head = get_head_to_head(home_team.get("id"), away_team.get("id"))
+
+        forebet_prediction = forebet_client.get_probabilities(
+            date,
+            home_team.get("name"),
+            away_team.get("name"),
+        )
+
+        forebet_data = None
+        if forebet_prediction:
+            forebet_data = {
+                "source": "Forebet",
+                "homeWinProbability": forebet_prediction.home,
+                "drawProbability": forebet_prediction.draw,
+                "awayWinProbability": forebet_prediction.away,
+                "over25Probability": forebet_prediction.over25,
+                "under25Probability": forebet_prediction.under25,
+                "bttsYesProbability": forebet_prediction.btts_yes,
+                "bttsNoProbability": forebet_prediction.btts_no,
+            }
 
         match_entry = {
             "fixtureId": fixture_id,
@@ -384,6 +421,8 @@ def fetch_matches(
             },
             "venue": fixture_info.get("venue", {}).get("name") or "TBD",
             "odds": odds_data,
+            "forebet": forebet_data,
+
             "form": {
                 "home": home_form,
                 "away": away_form,

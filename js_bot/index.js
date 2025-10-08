@@ -77,6 +77,126 @@ function identifyCompetition(league) {
   return null;
 }
 
+function decodeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .trim();
+}
+
+function buildForebetKey(home, away) {
+  const homeKey = normalize(home);
+  const awayKey = normalize(away);
+  if (!homeKey || !awayKey) return null;
+  return `${homeKey}|${awayKey}`;
+}
+
+function parsePercentages(text) {
+  if (!text) return [];
+  const matches = [...text.matchAll(/(-?\d+(?:\.\d+)?)\s*%/g)];
+  return matches.map((match) => Number(match[1]));
+}
+
+function parseForebetHtml(html, logger) {
+  const results = new Map();
+  if (!html) return results;
+
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const rowHtml = rowMatch[1];
+    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const cells = [];
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      cells.push(decodeHtml(cellMatch[1]));
+    }
+
+    if (cells.length < 3) continue;
+
+    let homeTeam = null;
+    let awayTeam = null;
+
+    const homeMatch = rowHtml.match(/class="[^"]*(home|tnms|team1)[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+    const awayMatch = rowHtml.match(/class="[^"]*(away|tnms2|team2)[^"]*"[^>]*>([\s\S]*?)<\/td>/i);
+
+    if (homeMatch) homeTeam = decodeHtml(homeMatch[2]);
+    if (awayMatch) awayTeam = decodeHtml(awayMatch[2]);
+
+    if (!homeTeam || !awayTeam) {
+      homeTeam = homeTeam || cells[1];
+      awayTeam = awayTeam || cells[2];
+    }
+
+    if (!homeTeam || !awayTeam) continue;
+
+    const percentages = cells.flatMap((cell) => parsePercentages(cell));
+    if (percentages.length < 3) continue;
+
+    const key = buildForebetKey(homeTeam, awayTeam);
+    if (!key || results.has(key)) continue;
+
+    const [homeProb, drawProb, awayProb] = percentages;
+    const overProb = percentages[3];
+    const underProb = percentages[4];
+    const bttsYes = percentages[5];
+    const bttsNo = percentages[6];
+
+    results.set(key, {
+      source: 'Forebet',
+      homeWinProbability: Math.round(homeProb ?? 0),
+      drawProbability: Math.round(drawProb ?? 0),
+      awayWinProbability: Math.round(awayProb ?? 0),
+      over25Probability: overProb !== undefined ? Math.round(overProb) : undefined,
+      under25Probability: underProb !== undefined ? Math.round(underProb) : undefined,
+      bttsYesProbability: bttsYes !== undefined ? Math.round(bttsYes) : undefined,
+      bttsNoProbability: bttsNo !== undefined ? Math.round(bttsNo) : undefined,
+    });
+  }
+
+  logger?.info?.(`Loaded ${results.size} Forebet predictions`);
+  return results;
+}
+
+async function fetchForebetPredictions(date, logger) {
+  try {
+    const targetDate = new Date(`${date}T00:00:00Z`);
+    const today = new Date();
+    const isToday =
+      targetDate.getUTCFullYear() === today.getUTCFullYear() &&
+      targetDate.getUTCMonth() === today.getUTCMonth() &&
+      targetDate.getUTCDate() === today.getUTCDate();
+    const slug = isToday ? 'today' : date;
+    const url = `https://www.forebet.com/en/football-tips-and-predictions-for-${slug}`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+
+    if (!response.ok) {
+      logger?.warn?.(`Forebet request failed: ${response.status}`);
+      return new Map();
+    }
+
+    const html = await response.text();
+    return parseForebetHtml(html, logger);
+  } catch (error) {
+    logger?.warn?.(`Unable to load Forebet predictions: ${error.message}`);
+    return new Map();
+  }
+}
+
 async function fetchJson(url, params, headers, timeout = 30000) {
   const urlObj = new URL(url);
   if (params) {
@@ -329,6 +449,7 @@ async function fetchMatches(date, settings, logger) {
 
   const matches = [];
   const regionCounters = Object.fromEntries(competitionData.regionOrder.map((region) => [region, 0]));
+  const forebetPredictions = await fetchForebetPredictions(date, logger);
 
   for (const fixture of fixturesToProcess) {
     const competition = identifyCompetition(fixture.league);
@@ -341,10 +462,28 @@ async function fetchMatches(date, settings, logger) {
     try {
       const oddsPayload = await fetchJson(
         'https://v3.football.api-sports.io/odds',
-        { fixture: fixtureId, bookmaker: settings.bookmakerId },
+        { fixture: fixtureId },
         headers,
       );
-      odds = oddsPayload.response?.[0]?.bookmakers?.[0]?.bets ?? [];
+
+      const bookmakers = oddsPayload.response?.[0]?.bookmakers ?? [];
+      const preferred = settings.bookmakerId;
+      const orderedBookmakers = [
+        ...bookmakers.filter((bookmaker) => bookmaker.id === preferred),
+        ...bookmakers.filter((bookmaker) => bookmaker.id !== preferred),
+      ];
+
+      const markets = new Map();
+      for (const bookmaker of orderedBookmakers) {
+        for (const bet of bookmaker.bets ?? []) {
+          if (!bet?.name) continue;
+          if (!markets.has(bet.name) || !(markets.get(bet.name)?.length > 0)) {
+            markets.set(bet.name, bet.values ?? []);
+          }
+        }
+      }
+
+      odds = Array.from(markets.entries()).map(([name, values]) => ({ name, values }));
     } catch (error) {
       logger.warn(`Failed to fetch odds for fixture ${fixtureId}: ${error.message}`);
     }
@@ -357,6 +496,10 @@ async function fetchMatches(date, settings, logger) {
       fetchTeamForm(awayTeamId, headers, logger),
       fetchHeadToHead(homeTeamId, awayTeamId, headers, logger),
     ]);
+
+    const forebetKey = buildForebetKey(fixture.teams?.home?.name, fixture.teams?.away?.name);
+    const forebet = forebetKey ? forebetPredictions.get(forebetKey) ?? null : null;
+
 
     let time = '';
     if (fixture.fixture?.date) {
@@ -385,6 +528,8 @@ async function fetchMatches(date, settings, logger) {
       teams: fixture.teams,
       venue: fixture.fixture?.venue?.name ?? 'TBD',
       odds,
+      forebet,
+
       form: {
         home: homeForm,
         away: awayForm,
@@ -432,6 +577,30 @@ const AWAY_LABELS = new Set(['away', '2', 'away team', 'team 2', '2 away']);
 const YES_LABELS = new Set(['yes', 'sim', 'y', 's']);
 const NO_LABELS = new Set(['no', 'nao', 'n']);
 
+const MARKET_ALIASES = new Map([
+  [
+    'match_winner',
+    new Set(['match winner', '1x2', 'full time result', 'match result', 'result', 'win-draw-win']),
+  ],
+  [
+    'goals_over_under',
+    new Set(['goals over/under', 'over/under', 'goals', 'goals o/u', 'total goals']),
+  ],
+  [
+    'both_teams_score',
+    new Set(['both teams score', 'both teams to score', 'btts', 'gg/ng', 'goal goal']),
+  ],
+]);
+
+function normalizeMarketName(value) {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return '';
+  for (const [key, aliases] of MARKET_ALIASES.entries()) {
+    if (aliases.has(normalized)) return key;
+  }
+  return normalized;
+}
+
 function isOver25Label(value) {
   const normalized = normalizeMarketValue(value);
   if (!normalized) return false;
@@ -476,10 +645,53 @@ function analyzeMatches(matches, logger) {
     };
 
     const markets = new Map();
+    const forebet = match.forebet || null;
+    let forebetUsed = false;
     for (const market of match.odds || []) {
-      markets.set(market.name, market.values || []);
+      const key = normalizeMarketName(market?.name);
+      if (!key) continue;
+      const values = Array.isArray(market?.values) ? market.values : [];
+      if (!markets.has(key) || !(markets.get(key)?.length > 0)) {
+        markets.set(key, values);
+      }
     }
 
+    for (const value of markets.get('match_winner') || []) {
+      const normalized = normalizeMarketValue(value.value);
+      if (HOME_LABELS.has(normalized)) entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
+      if (DRAW_LABELS.has(normalized)) entry.predictions.drawProbability = probabilityFromOdd(value.odd);
+      if (AWAY_LABELS.has(normalized)) entry.predictions.awayWinProbability = probabilityFromOdd(value.odd);
+    }
+
+    for (const value of markets.get('goals_over_under') || []) {
+      if (isOver25Label(value.value)) entry.predictions.over25Probability = probabilityFromOdd(value.odd);
+      if (isUnder25Label(value.value)) entry.predictions.under25Probability = probabilityFromOdd(value.odd);
+    }
+
+    for (const value of markets.get('both_teams_score') || []) {
+      const normalized = normalizeMarketValue(value.value);
+      if (YES_LABELS.has(normalized)) entry.predictions.bttsYesProbability = probabilityFromOdd(value.odd);
+      if (NO_LABELS.has(normalized)) entry.predictions.bttsNoProbability = probabilityFromOdd(value.odd);
+    }
+
+    if (forebet) {
+      const applyForebet = (sourceKey, targetKey) => {
+        if (entry.predictions[targetKey]) return;
+        const raw = forebet[sourceKey];
+        const value = Number(raw);
+        if (Number.isFinite(value) && value > 0) {
+          entry.predictions[targetKey] = Math.max(0, Math.min(100, Math.round(value)));
+          forebetUsed = true;
+        }
+      };
+
+      applyForebet('homeWinProbability', 'homeWinProbability');
+      applyForebet('drawProbability', 'drawProbability');
+      applyForebet('awayWinProbability', 'awayWinProbability');
+      applyForebet('over25Probability', 'over25Probability');
+      applyForebet('under25Probability', 'under25Probability');
+      applyForebet('bttsYesProbability', 'bttsYesProbability');
+      applyForebet('bttsNoProbability', 'bttsNoProbability');
     for (const value of markets.get('Match Winner') || []) {
       const normalized = normalizeMarketValue(value.value);
       if (HOME_LABELS.has(normalized)) entry.predictions.homeWinProbability = probabilityFromOdd(value.odd);
@@ -571,6 +783,10 @@ function analyzeMatches(matches, logger) {
       notes.push('Confrontos diretos recentes com média superior a 3 golos');
     }
 
+    if (forebetUsed) {
+      notes.push('Probabilidades 1X2 complementadas com dados da Forebet');
+    }
+
     entry.analysisNotes = notes.slice(0, 3);
 
     confidenceScore += qualitativeBoost;
@@ -612,7 +828,13 @@ function analyzeMatches(matches, logger) {
 
   const score = (match) => {
     const base = { high: 3, medium: 2, low: 1 }[match.confidence] || 0;
-    return base * 10 + (match.recommendedBets?.length || 0);
+    const predictions = match.predictions || {};
+    const maxProbability = Math.max(
+      Number(predictions.homeWinProbability) || 0,
+      Number(predictions.drawProbability) || 0,
+      Number(predictions.awayWinProbability) || 0,
+    );
+    return base * 1000 + (match.recommendedBets?.length || 0) * 10 + maxProbability;
   };
 
   const sorted = [...analyzed].sort((a, b) => score(b) - score(a));
