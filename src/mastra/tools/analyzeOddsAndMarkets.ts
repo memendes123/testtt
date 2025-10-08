@@ -15,6 +15,98 @@ type AnalyzedMatch = any & {
   };
   confidence: "low" | "medium" | "high";
   recommendedBets: string[];
+  analysisNotes?: string[];
+};
+
+type TeamFormSummary = {
+  currentStreak?: { type?: string; count?: number } | null;
+  recentRecord?: string;
+  avgGoalsFor?: number;
+  avgGoalsAgainst?: number;
+  goalDifferenceAvg?: number;
+  winRate?: number;
+  drawRate?: number;
+  lossRate?: number;
+};
+
+type HeadToHeadSummary = {
+  homeWins?: number;
+  awayWins?: number;
+  draws?: number;
+  avgGoalsTotal?: number;
+} | null;
+
+const normalizeMarketValue = (value: unknown): string => {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  return value
+    .toString()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[,]/g, ".")
+    .replace(/[()]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+};
+
+const HOME_LABELS = new Set([
+  "home",
+  "1",
+  "home team",
+  "team 1",
+  "1 home",
+]);
+
+const DRAW_LABELS = new Set([
+  "draw",
+  "x",
+  "empate",
+]);
+
+const AWAY_LABELS = new Set([
+  "away",
+  "2",
+  "away team",
+  "team 2",
+  "2 away",
+]);
+
+const YES_LABELS = new Set([
+  "yes",
+  "sim",
+  "y",
+  "s",
+]);
+
+const NO_LABELS = new Set([
+  "no",
+  "nao",
+  "n",
+]);
+
+const isOver25Label = (value: unknown): boolean => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+
+  if (normalized.includes("over") || normalized.includes("mais de")) {
+    return normalized.includes("2.5") || normalized.includes("25");
+  }
+
+  return false;
+};
+
+const isUnder25Label = (value: unknown): boolean => {
+  const normalized = normalizeMarketValue(value);
+  if (!normalized) return false;
+
+  if (normalized.includes("under") || normalized.includes("menos de")) {
+    return normalized.includes("2.5") || normalized.includes("25");
+  }
+
+  return false;
 };
 
 const normalizeMarketValue = (value: unknown): string => {
@@ -118,6 +210,7 @@ const analyzeMatchOdds = ({
       },
       recommendedBets: [] as string[],
       confidence: "low" as "low" | "medium" | "high",
+      analysisNotes: [] as string[],
     };
 
     if (!match.odds || match.odds.length === 0) {
@@ -230,8 +323,86 @@ const analyzeMatchOdds = ({
         totalConfidence += 1;
       }
 
+      const notes: string[] = [];
+      let qualitativeBoost = 0;
+
+      const homeForm = (match.form?.home ?? null) as TeamFormSummary | null;
+      const awayForm = (match.form?.away ?? null) as TeamFormSummary | null;
+      const headToHead = (match.form?.headToHead ?? null) as HeadToHeadSummary;
+
+      const summarizeRecord = (record?: string) => (record ?? "").slice(0, 5);
+
+      if (homeForm?.currentStreak?.type === "win" && (homeForm.currentStreak.count ?? 0) >= 3) {
+        notes.push(
+          `Casa com ${homeForm.currentStreak.count} vitórias seguidas (${summarizeRecord(homeForm.recentRecord)})`,
+        );
+        qualitativeBoost += 1;
+      }
+
+      if (awayForm?.currentStreak?.type === "loss" && (awayForm.currentStreak.count ?? 0) >= 2) {
+        notes.push(
+          `Visitante sem vencer há ${awayForm.currentStreak.count} jogos (${summarizeRecord(awayForm.recentRecord)})`,
+        );
+        qualitativeBoost += 1;
+      }
+
+      const avgAttack = (homeForm?.avgGoalsFor ?? 0) + (awayForm?.avgGoalsFor ?? 0);
+      if (avgAttack >= 3.2) {
+        notes.push("Tendência de muitos golos (médias ofensivas altas nas últimas partidas)");
+      } else if (avgAttack <= 2.0) {
+        notes.push("Tendência de poucos golos nos últimos jogos das equipas");
+      }
+
+      if ((headToHead?.homeWins ?? 0) >= 3) {
+        notes.push("Histórico recente favorável ao mandante no confronto direto");
+        qualitativeBoost += 1;
+      }
+
+      if ((headToHead?.avgGoalsTotal ?? 0) >= 3) {
+        notes.push("Confrontos diretos recentes com média superior a 3 golos");
+      }
+
+      analysis.analysisNotes = notes.slice(0, 3);
+
+      const formCount = (homeForm ? 1 : 0) + (awayForm ? 1 : 0) || 1;
+      const drawRate = ((homeForm?.drawRate ?? 0) + (awayForm?.drawRate ?? 0)) / formCount;
+      const shouldBackfillProbabilities =
+        analysis.predictions.homeWinProbability === 0 &&
+        analysis.predictions.awayWinProbability === 0 &&
+        analysis.predictions.drawProbability === 0 &&
+        (homeForm || awayForm);
+
+      if (shouldBackfillProbabilities) {
+        const drawProbability = Math.round(Math.min(drawRate, 0.45) * 100);
+        const homeScore =
+          (homeForm?.winRate ?? 0) +
+          Math.max(homeForm?.goalDifferenceAvg ?? 0, 0) +
+          (awayForm?.lossRate ?? 0) * 0.6;
+        const awayScore =
+          (awayForm?.winRate ?? 0) +
+          Math.max(awayForm?.goalDifferenceAvg ?? 0, 0) +
+          (homeForm?.lossRate ?? 0) * 0.6;
+
+        const total = homeScore + awayScore;
+        const available = Math.max(0, 100 - drawProbability);
+
+        if (total > 0) {
+          analysis.predictions.homeWinProbability = Math.round((homeScore / total) * available);
+          analysis.predictions.awayWinProbability = Math.max(
+            0,
+            available - analysis.predictions.homeWinProbability,
+          );
+        } else {
+          analysis.predictions.homeWinProbability = Math.round(available / 2);
+          analysis.predictions.awayWinProbability = available - analysis.predictions.homeWinProbability;
+        }
+
+        analysis.predictions.drawProbability = drawProbability;
+      }
+
+      totalConfidence += qualitativeBoost;
       analysis.recommendedBets = recommendations;
-      
+
       // Determine overall confidence
       if (totalConfidence >= 5) {
         analysis.confidence = "high";

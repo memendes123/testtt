@@ -122,6 +122,8 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 ## 5. Como a análise funciona
 
 * **Conversão de odds em probabilidade:** cada odd decimal é convertida em percentual (`100 / odd`).
+* **Form vs. histórico:** quando uma casa de apostas não oferece odds para 1X2, usamos o desempenho recente (últimos 5 jogos) e o confronto direto para estimar probabilidades, evitando relatórios zerados.
+* **Notas chave (PK):** para cada destaque são listados até 2 “pontos-chave” baseados na forma das equipas (sequência de vitórias/derrotas, média de golos, confrontos diretos).
 * **Classificação de confiança:** partidas com probabilidades altas geram recomendações "Forte favorito" ou "Favorito". Mercados Over/Under e Ambos Marcam entram na lista caso ultrapassem 60%.
 * **Pontuação e ordenação:** os jogos são reordenados por confiança e quantidade de recomendações, exibindo os melhores primeiro e organizando por região/competição.
 * **Resumo agregado:** o relatório mostra quantos jogos de alta ou média confiança existem por região, ajudando a priorizar ligas.
@@ -139,5 +141,44 @@ Para ver a lógica exata consulte:
 * Ajuste a lista de competições em `shared/competitions.json` para focar apenas nos campeonatos desejados.
 * Ajuste os thresholds de confiança no `analyzer.py` caso queira alertas mais conservadores ou agressivos.
 * Integre com outras saídas (Discord, e-mail) reutilizando a função `message_builder.build_message`.
+
+---
+
+## 7. Gerindo jobs agendados (cron/PM2)
+
+Quando precisar parar o bot para aplicar atualizações ou trocar credenciais, basta seguir os passos abaixo conforme a ferramenta usada:
+
+### Cron (Linux/macOS)
+
+1. **Listar o agendamento atual:**
+   ```bash
+   crontab -l
+   ```
+2. **Editar/pausar temporariamente:** comente a linha do bot adicionando `#` no início.
+   ```bash
+   crontab -e
+   # 0 9 * * * /caminho/para/.venv/bin/python -m python_bot.main --env /caminho/.env
+   ```
+3. **Aplicar a atualização (pull/commit/etc.)**
+4. **Reativar:** remova o `#` e salve novamente com `crontab -e`.
+
+### PM2 (Node.js)
+
+```bash
+# Parar o processo
+npx pm2 stop futebol-bot
+
+# Aplicar atualizações no código
+git pull
+npm install
+
+# Subir novamente (ajuste o comando conforme seu fluxo)
+npx pm2 start "node js_bot/index.js --env /caminho/.env" --name futebol-bot --cron "0 9 * * *"
+
+# Verificar status
+npx pm2 status futebol-bot
+```
+
+Para remover definitivamente um job agendado, use `crontab -e` (removendo a linha) ou `npx pm2 delete futebol-bot`. Depois de reinstalar dependências ou atualizar o código, execute os comandos de start novamente.
 
 Com esse guia você consegue hospedar o bot no seu PC, VPS ou Replit, mantendo as credenciais seguras e garantindo execuções automáticas confiáveis.
