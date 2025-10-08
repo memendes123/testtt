@@ -21,6 +21,9 @@ Este repositório contém duas portas independentes (Python e Node.js) do fluxo 
 | `TELEGRAM_CHANNEL_ID` | ⚪️ | Canal público (ex.: `@meucanal`) caso queira publicar automaticamente. |
 | `FOOTBALL_API_BOOKMAKER` | ⚪️ | ID do bookmaker desejado (padrão `6` – Pinnacle). |
 | `FOOTBALL_MAX_FIXTURES` | ⚪️ | Limite de jogos carregados por execução (padrão `120`). |
+| `TELEGRAM_OWNER_ID` | ⚪️ | ID numérico da conta que poderá usar o comando exclusivo `/insight`. |
+| `OPENAI_API_KEY` | ⚪️ | Chave da OpenAI para gerar resumos via ChatGPT (opcional). |
+| `OPENAI_MODEL` | ⚪️ | Modelo da OpenAI a utilizar (padrão `gpt-4o-mini`). |
 
 ### Guardando os segredos com segurança
 
@@ -80,6 +83,26 @@ FOOTBALL_MAX_FIXTURES=120
    ```
 
 > Ambas as versões aceitam `--date YYYY-MM-DD` para backfill e `--output arquivo.json` para salvar o payload completo.
+
+### Comando privado com ChatGPT (owner)
+
+Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
+
+1. Defina no `.env`:
+   ```env
+   TELEGRAM_OWNER_ID=123456789
+   OPENAI_API_KEY=sk-...
+   ```
+   (o `OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado).
+2. Inicie o listener dedicado:
+   ```bash
+   python -m python_bot.owner_command --env .env
+   ```
+3. No chat privado com o bot, envie comandos como:
+   * `/insight city` → procura o próximo jogo do Manchester City e gera análise completa.
+   * `/insight city-psg` → foca no confronto directo entre City e PSG.
+
+O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Apenas o `TELEGRAM_OWNER_ID` configurado pode usar este comando; pedidos de outros utilizadores são recusados automaticamente.
 
 ---
 
