@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -17,12 +18,12 @@ from .telegram_client import TelegramClient
 COMMAND_ALIASES = {"/insight", "/insights", "/analise", "/analisar"}
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Listener de comandos privados para o owner")
     parser.add_argument("--env", help="Caminho opcional para ficheiro .env", default=None)
     parser.add_argument("--verbose", action="store_true", help="Ativa logs detalhados")
     parser.add_argument("--poll-interval", type=int, default=5, help="Pausa (s) entre chamadas em caso de erro")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def extract_command(text: Optional[str]) -> Optional[tuple[str, str]]:
@@ -100,13 +101,13 @@ def build_response_message(match: dict, analysis: dict, gpt_summary: Optional[st
     return "\n".join(lines)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
     logger = logging.getLogger("owner-command")
 
     try:
-        settings = load_settings(args.env)
+        settings = load_settings(Path(args.env) if args.env else None)
     except RuntimeError as exc:
         logger.error("Erro ao carregar configuração: %s", exc)
         return 1
