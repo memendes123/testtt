@@ -77,6 +77,7 @@ FOOTBALL_MAX_FIXTURES=120
 ### Node.js
 
 1. **Instale dependências (Node 18+):** `npm install`
+   *O projeto mantém o `@mastra/core` na série 0.18 para continuar compatível com `@mastra/libsql`. Caso personalize as dependências, mantenha versões < 0.19 ou atualize os dois pacotes em conjunto.*
 2. **Execute o CLI em modo teste:**
    ```bash
    node js_bot/index.js --env .env --dry-run
