@@ -17,6 +17,7 @@ class Settings:
     bookmaker_id: int = 6
     max_fixtures: int = 120
     telegram_owner_id: Optional[str] = None
+    telegram_admin_ids: tuple[str, ...] = ()
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-5.0"
 
@@ -36,6 +37,14 @@ def load_settings(env_file: Optional[Path] = None) -> Settings:
     channel_id = os.getenv("TELEGRAM_CHANNEL_ID")
     default_chat = os.getenv("TELEGRAM_DEFAULT_CHAT_ID")
     owner_id = os.getenv("TELEGRAM_OWNER_ID")
+    admin_ids_raw = os.getenv("TELEGRAM_ADMIN_IDS")
+    admin_ids: tuple[str, ...] = ()
+    if admin_ids_raw:
+        admin_ids = tuple(
+            token.strip()
+            for token in admin_ids_raw.replace(";", ",").split(",")
+            if token.strip()
+        )
     bookmaker = int(os.getenv("FOOTBALL_API_BOOKMAKER", "6"))
     max_fixtures = int(os.getenv("FOOTBALL_MAX_FIXTURES", "120"))
     openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -49,6 +58,7 @@ def load_settings(env_file: Optional[Path] = None) -> Settings:
         bookmaker_id=bookmaker,
         max_fixtures=max_fixtures,
         telegram_owner_id=owner_id,
+        telegram_admin_ids=admin_ids,
         openai_api_key=openai_api_key,
         openai_model=openai_model,
     )
