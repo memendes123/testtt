@@ -68,11 +68,11 @@ FOOTBALL_MAX_FIXTURES=120
    * **Windows:** Agendador de Tarefas apontando para `python.exe -m python_bot.main --env C:\caminho\.env`
    * Alternativa embutida: `python -m python_bot.scheduler --env .env --time 00:10 --timezone Europe/Lisbon`
 
-5. **Alertas em jogos ao vivo:**
+5. **Alertas em jogos ao vivo (sem intervalo de 1h):**
    ```bash
-   python -m python_bot.live_monitor --env .env --interval 180 --min-confidence medium
+   python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
    ```
-   O monitor envia apenas novas recomendações ou elevações de confiança para evitar alertas repetidos.
+   Esse processo consulta os jogos em andamento a cada `--interval` segundos (mínimo 30s) e dispara imediatamente qualquer nova análise ou aumento de confiança. Ele é o comando indicado para manter avisos em tempo real sem depender de um loop com `sleep 3600`.
 
 ### Node.js
 
@@ -120,14 +120,11 @@ O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK 
 
 Se quiser manter o bot emitindo alertas frequentes (ex.: a cada hora) enquanto seu PC está ligado:
 
-1. **Crie um script de loop** (exemplo Python):
-   ```bash
-   while true; do
-     python -m python_bot.main --env /caminho/.env
-     sleep 3600  # aguarda 1 hora
-   done
-   ```
-2. **Execute dentro de `screen` ou `tmux`** para não depender da sessão aberta.
+1. **Use o monitor contínuo:** rode `python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium` para receber alertas assim que surgirem, sem aguardar 1 hora.
+2. **Execute dentro de `tmux`, `screen` ou `nohup`** para não depender da sessão aberta.
+   * `tmux new -s futebol` → execute o monitor → `Ctrl+B` seguido de `D` para destacar.
+   * `screen -S futebol` → execute o monitor → `Ctrl+A` seguido de `D` para destacar.
+   * `nohup python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium > monitor.log 2>&1 &` para deixar rodando em segundo plano com log.
 3. **Configure o sistema para iniciar com o computador:**
    * Linux (systemd): use o ficheiro de exemplo `scripts/live_monitor.service.example`, ajuste os caminhos e copie para `/etc/systemd/system/futebol-bot-live.service`.
    * Windows: use o [NSSM](https://nssm.cc/) para transformar o comando em serviço.
@@ -141,12 +138,12 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 1. Faça upload dos diretórios `python_bot`, `js_bot`, `shared` e do arquivo `shared/competitions.json` para o seu Replit.
 2. No painel **Secrets**, cadastre as variáveis `FOOTBALL_API_KEY`, `TELEGRAM_BOT_TOKEN` etc.
 3. Escolha qual runtime deseja manter:
-   * **Python:** defina o comando de execução para `python -m python_bot.main`.
+   * **Python (recomendado para alertas 24/7):** defina o comando de execução para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium`.
    * **Node:** defina o comando de execução para `node js_bot/index.js`.
 4. Para manter o Replit sempre ativo:
    * Use o plano Hacker (mantém a instância viva) **ou**
    * Configure um ping externo (ex.: UptimeRobot) chamando a webview gerada pelo Replit a cada 5 minutos.
-5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais.
+5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais. Caso use o monitor contínuo, reduza o `--interval` conforme necessário (ex.: 60s) para tornar os avisos mais frequentes sem exceder o limite da API.
 
 > Replit pausa o container após inatividade em contas gratuitas. O ping externo mantém a execução, mas se o processo falhar será necessário abrir o projeto e reiniciar manualmente.
 

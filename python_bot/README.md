@@ -62,7 +62,7 @@ Argumentos úteis:
 Para receber alertas em tempo real quando surgirem novas recomendações durante as partidas, utilize o módulo `python_bot.live_monitor`:
 
 ```bash
-python -m python_bot.live_monitor --env .env --interval 180 --min-confidence medium
+python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
 ```
 
 O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
