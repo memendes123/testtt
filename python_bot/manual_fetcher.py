@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Dict, Optional, Tuple
+import unicodedata
 
 import requests
 
@@ -21,9 +22,19 @@ def _headers(settings: Settings) -> Dict[str, str]:
     }
 
 
+def _normalize_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = unicodedata.normalize("NFD", value)
+    normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    normalized = " ".join(segment.strip() for segment in normalized.split())
+    return normalized.lower()
+
+
 def _search_team(query: str, settings: Settings, logger: logging.Logger) -> Optional[Dict[str, object]]:
     if not query:
         return None
+    normalized_query = _normalize_text(query)
     try:
         response = requests.get(
             f"{API_BASE}/teams",
@@ -37,11 +48,45 @@ def _search_team(query: str, settings: Settings, logger: logging.Logger) -> Opti
         logger.error("Falha ao procurar equipa", extra={"query": query, "error": str(exc)})
         return None
 
+    best_team: Optional[Dict[str, object]] = None
+    best_score = -1
     for item in payload.get("response", []) or []:
         team = item.get("team") or {}
         if not isinstance(team, dict):
             continue
-        return team
+        name = team.get("name")
+        normalized_name = _normalize_text(name) or ""
+        score = 0
+        if normalized_query and normalized_name == normalized_query:
+            score += 200
+        elif normalized_query and normalized_name.startswith(normalized_query):
+            score += 140
+        elif normalized_query and normalized_query in normalized_name:
+            score += 100
+
+        country = _normalize_text(team.get("country")) or ""
+        if normalized_query and normalized_query == country:
+            score += 160
+
+        if team.get("national"):
+            score += 60
+
+        code = team.get("code")
+        if isinstance(code, str) and normalized_query:
+            if normalized_query.startswith(code.lower()):
+                score += 40
+
+        if score > best_score:
+            best_team = team
+            best_score = score
+
+    if best_team:
+        return best_team
+
+    for item in payload.get("response", []) or []:
+        team = item.get("team")
+        if isinstance(team, dict):
+            return team
     return None
 
 
