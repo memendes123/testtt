@@ -141,11 +141,31 @@ def format_predictions_message(
 
     message_lines = [f"🏆 <b>PREVISÕES FUTEBOL - {formatted_date}</b>", ""]
 
+    total_matches = match_data.get("totalMatches")
+    if not isinstance(total_matches, int) or total_matches == 0:
+        total_matches = len(match_data.get("matches", []) or [])
+
+    analyzed_matches = analysis.get("totalAnalyzed")
+    if not isinstance(analyzed_matches, int) or analyzed_matches == 0:
+        analyzed_matches = len(analysis.get("allMatches", []) or [])
+
+    def _confidence_count(key: str, label: str) -> int:
+        raw_value = analysis.get(key)
+        if isinstance(raw_value, int) and raw_value > 0:
+            return raw_value
+        matches = analysis.get("allMatches") or []
+        if not isinstance(matches, list):
+            return 0
+        return sum(1 for item in matches if item.get("confidence") == label)
+
+    high_confidence = _confidence_count("highConfidenceCount", "high")
+    medium_confidence = _confidence_count("mediumConfidenceCount", "medium")
+
     summary = [
         "📊 <b>Resumo Global:</b>",
-        f"• {match_data.get('totalMatches', 0)} jogos elegíveis nas competições suportadas",
-        f"• {analysis.get('totalAnalyzed', 0)} jogos com odds válidas analisados",
-        f"• {analysis.get('highConfidenceCount', 0)} jogos de alta confiança | {analysis.get('mediumConfidenceCount', 0)} de média confiança",
+        f"• {total_matches} jogos elegíveis nas competições suportadas",
+        f"• {analyzed_matches} jogos com odds válidas analisados",
+        f"• {high_confidence} jogos de alta confiança | {medium_confidence} de média confiança",
     ]
     message_lines.extend(summary)
     message_lines.append("")
@@ -165,6 +185,10 @@ def format_predictions_message(
     llm_insights_list = [insight for insight in (llm_insights or []) if isinstance(insight, dict)]
 
     best_matches = analysis.get("bestMatches", []) or []
+    if not best_matches:
+        fallback_matches = analysis.get("allMatches") or match_data.get("matches") or []
+        if isinstance(fallback_matches, list) and fallback_matches:
+            best_matches = fallback_matches
     if best_matches:
         top_matches = best_matches[: min(5, len(best_matches))]
         message_lines.append(f"🔥 <b>TOP GLOBAL ({len(top_matches)})</b>")
