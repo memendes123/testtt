@@ -1,0 +1,16 @@
+[Unit]
+Description=Futebol Bot Live Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/project
+EnvironmentFile=/path/to/project/.env
+ExecStart=/path/to/project/.venv/bin/python -m python_bot.live_monitor --env /path/to/project/.env --interval 180 --min-confidence medium
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

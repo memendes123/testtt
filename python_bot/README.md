@@ -14,6 +14,8 @@ TELEGRAM_DEFAULT_CHAT_ID=123456789
 TELEGRAM_CHANNEL_ID=@your_channel
 FOOTBALL_API_BOOKMAKER=6
 FOOTBALL_MAX_FIXTURES=120
+TELEGRAM_OWNER_ID=123456789
+TELEGRAM_ADMIN_IDS=987654321,111111111
 ```
 
 2. Install dependencies (Python 3.11+ recommended):
@@ -64,3 +66,16 @@ python -m python_bot.live_monitor --env .env --interval 180 --min-confidence med
 ```
 
 O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
+
+Para manter o monitor sempre disponível num servidor Linux com systemd:
+
+1. Ajuste `scripts/live_monitor.service.example` com os caminhos da sua `venv` e do `.env`.
+2. Copie o ficheiro e ative o serviço:
+
+   ```bash
+   sudo cp scripts/live_monitor.service.example /etc/systemd/system/futebol-live-monitor.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now futebol-live-monitor.service
+   ```
+
+O serviço reinicia automaticamente o monitor em caso de falha ou reboot.

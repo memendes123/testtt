@@ -22,6 +22,7 @@ Este repositório contém duas portas independentes (Python e Node.js) do fluxo 
 | `FOOTBALL_API_BOOKMAKER` | ⚪️ | ID do bookmaker desejado (padrão `6` – Pinnacle). |
 | `FOOTBALL_MAX_FIXTURES` | ⚪️ | Limite de jogos carregados por execução (padrão `120`). |
 | `TELEGRAM_OWNER_ID` | ⚪️ | ID numérico da conta que poderá usar o comando exclusivo `/insight`. |
+| `TELEGRAM_ADMIN_IDS` | ⚪️ | Lista de IDs adicionais (separados por vírgula ou ponto e vírgula) autorizados a usar o `/insight`. |
 | `OPENAI_API_KEY` | ⚪️ | Chave da OpenAI para gerar resumos via ChatGPT (opcional). |
 | `OPENAI_MODEL` | ⚪️ | Modelo da OpenAI a utilizar (padrão `gpt-4o-mini`). |
 
@@ -76,6 +77,7 @@ FOOTBALL_MAX_FIXTURES=120
 ### Node.js
 
 1. **Instale dependências (Node 18+):** `npm install`
+   *O projeto mantém o `@mastra/core` na série 0.18 para continuar compatível com `@mastra/libsql`. Caso personalize as dependências, mantenha versões < 0.19 ou atualize os dois pacotes em conjunto.*
 2. **Execute o CLI em modo teste:**
    ```bash
    node js_bot/index.js --env .env --dry-run
@@ -95,12 +97,13 @@ FOOTBALL_MAX_FIXTURES=120
 
 Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
 
-1. Defina no `.env`:
+1. Defina no `.env` (pode usar múltiplos admins):
    ```env
    TELEGRAM_OWNER_ID=123456789
+   TELEGRAM_ADMIN_IDS=987654321,111111111
    OPENAI_API_KEY=sk-...
    ```
-   (o `OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado).
+   (`OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado.)
 2. Inicie o listener dedicado:
    ```bash
    python -m python_bot.owner_command --env .env
@@ -109,7 +112,7 @@ Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
    * `/insight city` → procura o próximo jogo do Manchester City e gera análise completa.
    * `/insight city-psg` → foca no confronto directo entre City e PSG.
 
-O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Apenas o `TELEGRAM_OWNER_ID` configurado pode usar este comando; pedidos de outros utilizadores são recusados automaticamente.
+O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Todos os IDs listados em `TELEGRAM_OWNER_ID` e `TELEGRAM_ADMIN_IDS` podem usar o comando; pedidos de outros utilizadores são recusados automaticamente.
 
 ---
 
@@ -126,7 +129,7 @@ Se quiser manter o bot emitindo alertas frequentes (ex.: a cada hora) enquanto s
    ```
 2. **Execute dentro de `screen` ou `tmux`** para não depender da sessão aberta.
 3. **Configure o sistema para iniciar com o computador:**
-   * Linux (systemd): crie `/etc/systemd/system/futebol-bot.service` apontando para o comando acima.
+   * Linux (systemd): use o ficheiro de exemplo `scripts/live_monitor.service.example`, ajuste os caminhos e copie para `/etc/systemd/system/futebol-bot-live.service`.
    * Windows: use o [NSSM](https://nssm.cc/) para transformar o comando em serviço.
 
 Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use um VPS ou serviço na nuvem.

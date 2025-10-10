@@ -112,8 +112,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         logger.error("Erro ao carregar configuração: %s", exc)
         return 1
 
-    if not settings.telegram_owner_id:
-        logger.error("Configure TELEGRAM_OWNER_ID para usar o comando exclusivo do owner.")
+    allowed_ids = set(settings.telegram_admin_ids)
+    if settings.telegram_owner_id:
+        allowed_ids.add(str(settings.telegram_owner_id))
+
+    if not allowed_ids:
+        logger.error(
+            "Configure TELEGRAM_OWNER_ID ou TELEGRAM_ADMIN_IDS para usar o comando exclusivo."
+        )
         return 1
 
     index = load_index()
@@ -149,9 +155,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not command:
                 continue
 
-            if str(message.get("from", {}).get("id")) != str(settings.telegram_owner_id):
-                telegram.send_message("Este comando é reservado ao owner.", chat_id=str(chat_id))
-                logger.info("Comando ignorado por utilizador não autorizado", extra={"chatId": chat_id})
+            sender_id = str(message.get("from", {}).get("id"))
+            if sender_id not in allowed_ids:
+                telegram.send_message(
+                    "Este comando é reservado ao owner/administradores autorizados.",
+                    chat_id=str(chat_id),
+                )
+                logger.info(
+                    "Comando ignorado por utilizador não autorizado",
+                    extra={"chatId": chat_id},
+                )
                 continue
 
             _, query = command
