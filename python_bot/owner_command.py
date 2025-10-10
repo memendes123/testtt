@@ -102,18 +102,16 @@ def build_response_message(match: dict, analysis: dict, gpt_summary: Optional[st
     return "\n".join(lines)
 
 
-def listen_for_owner_commands(
-    settings,
-    *,
-    index=None,
-    poll_interval: int = 5,
-    logger: Optional[logging.Logger] = None,
-    stop_event: Optional[Event] = None,
-):
-    if logger is None:
-        logger = logging.getLogger("owner-command")
-    if index is None:
-        index = load_index()
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+    logger = logging.getLogger("owner-command")
+
+    try:
+        settings = load_settings(Path(args.env) if args.env else None)
+    except RuntimeError as exc:
+        logger.error("Erro ao carregar configuração: %s", exc)
+        return 1
 
     allowed_ids = set(settings.telegram_admin_ids)
     if settings.telegram_owner_id:
