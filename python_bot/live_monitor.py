@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+from threading import Event
 
 from .analyzer import analyze_matches
 from .competitions import load_index
@@ -82,6 +83,7 @@ class LiveMonitor:
         min_confidence: str,
         dry_run: bool,
         logger: logging.Logger,
+        stop_event: Optional[Event],
     ) -> None:
         self.settings = settings
         self.index = index
@@ -93,6 +95,16 @@ class LiveMonitor:
         self.client = None if dry_run else TelegramClient(settings, logger=logger)
         self._sent_flags: Dict[int, Set[str]] = {}
         self._score_cache: Dict[int, Tuple[int, int]] = {}
+        self.stop_event = stop_event
+
+    def _should_stop(self) -> bool:
+        return bool(self.stop_event and self.stop_event.is_set())
+
+    def _wait(self, seconds: int) -> bool:
+        if self.stop_event:
+            return self.stop_event.wait(seconds)
+        time.sleep(seconds)
+        return False
 
     def _cleanup_finished(self, matches: List[Dict[str, object]]) -> None:
         active_ids: Set[int] = set()
@@ -302,7 +314,7 @@ class LiveMonitor:
             self.min_rank,
         )
 
-        while True:
+        while not self._should_stop():
             try:
                 match_data = fetch_matches(
                     datetime.now(timezone.utc),
@@ -313,7 +325,8 @@ class LiveMonitor:
                 )
             except FetchError as exc:
                 self.logger.error("Falha ao buscar jogos ao vivo: %s", exc)
-                time.sleep(self.interval)
+                if self._wait(self.interval):
+                    break
                 continue
 
             matches = match_data.get("matches", []) or []
@@ -321,7 +334,8 @@ class LiveMonitor:
 
             if not matches:
                 self.logger.debug("Nenhum jogo ao vivo nas competições monitorizadas")
-                time.sleep(self.interval)
+                if self._wait(self.interval):
+                    break
                 continue
 
             analysis = analyze_matches(matches, self.index, logger=self.logger)
@@ -343,7 +357,10 @@ class LiveMonitor:
                 except Exception as exc:  # noqa: BLE001
                     self.logger.error("Falha ao enviar alerta ao vivo", exc_info=exc)
 
-            time.sleep(self.interval)
+            if self._wait(self.interval):
+                break
+
+        self.logger.info("Monitor live encerrado")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -370,6 +387,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         min_confidence=args.min_confidence,
         dry_run=args.dry_run,
         logger=logger,
+        stop_event=None,
     )
 
     monitor.run()
