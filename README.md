@@ -22,6 +22,7 @@ Este repositório contém duas portas independentes (Python e Node.js) do fluxo 
 | `FOOTBALL_API_BOOKMAKER` | ⚪️ | ID do bookmaker desejado (padrão `6` – Pinnacle). |
 | `FOOTBALL_MAX_FIXTURES` | ⚪️ | Limite de jogos carregados por execução (padrão `120`). |
 | `TELEGRAM_OWNER_ID` | ⚪️ | ID numérico da conta que poderá usar o comando exclusivo `/insight`. |
+| `TELEGRAM_ADMIN_IDS` | ⚪️ | Lista de IDs adicionais (separados por vírgula ou ponto e vírgula) autorizados a usar o `/insight`. |
 | `OPENAI_API_KEY` | ⚪️ | Chave da OpenAI para gerar resumos via ChatGPT (opcional). |
 | `OPENAI_MODEL` | ⚪️ | Modelo da OpenAI a utilizar (padrão `gpt-4o-mini`). |
 
@@ -67,15 +68,16 @@ FOOTBALL_MAX_FIXTURES=120
    * **Windows:** Agendador de Tarefas apontando para `python.exe -m python_bot.main --env C:\caminho\.env`
    * Alternativa embutida: `python -m python_bot.scheduler --env .env --time 00:10 --timezone Europe/Lisbon`
 
-5. **Alertas em jogos ao vivo:**
+5. **Alertas em jogos ao vivo (sem intervalo de 1h):**
    ```bash
-   python -m python_bot.live_monitor --env .env --interval 180 --min-confidence medium
+   python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
    ```
-   O monitor envia apenas novas recomendações ou elevações de confiança para evitar alertas repetidos.
+   Esse processo consulta os jogos em andamento a cada `--interval` segundos (mínimo 30s) e dispara imediatamente qualquer nova análise ou aumento de confiança. Ele é o comando indicado para manter avisos em tempo real sem depender de um loop com `sleep 3600`.
 
 ### Node.js
 
 1. **Instale dependências (Node 18+):** `npm install`
+   *O projeto mantém o `@mastra/core` na série 0.18 para continuar compatível com `@mastra/libsql`. Caso personalize as dependências, mantenha versões < 0.19 ou atualize os dois pacotes em conjunto.*
 2. **Execute o CLI em modo teste:**
    ```bash
    node js_bot/index.js --env .env --dry-run
@@ -95,12 +97,13 @@ FOOTBALL_MAX_FIXTURES=120
 
 Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
 
-1. Defina no `.env`:
+1. Defina no `.env` (pode usar múltiplos admins):
    ```env
    TELEGRAM_OWNER_ID=123456789
+   TELEGRAM_ADMIN_IDS=987654321,111111111
    OPENAI_API_KEY=sk-...
    ```
-   (o `OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado).
+   (`OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado.)
 2. Inicie o listener dedicado:
    ```bash
    python -m python_bot.owner_command --env .env
@@ -109,7 +112,7 @@ Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
    * `/insight city` → procura o próximo jogo do Manchester City e gera análise completa.
    * `/insight city-psg` → foca no confronto directo entre City e PSG.
 
-O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Apenas o `TELEGRAM_OWNER_ID` configurado pode usar este comando; pedidos de outros utilizadores são recusados automaticamente.
+O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Todos os IDs listados em `TELEGRAM_OWNER_ID` e `TELEGRAM_ADMIN_IDS` podem usar o comando; pedidos de outros utilizadores são recusados automaticamente.
 
 ---
 
@@ -117,16 +120,13 @@ O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK 
 
 Se quiser manter o bot emitindo alertas frequentes (ex.: a cada hora) enquanto seu PC está ligado:
 
-1. **Crie um script de loop** (exemplo Python):
-   ```bash
-   while true; do
-     python -m python_bot.main --env /caminho/.env
-     sleep 3600  # aguarda 1 hora
-   done
-   ```
-2. **Execute dentro de `screen` ou `tmux`** para não depender da sessão aberta.
+1. **Use o monitor contínuo:** rode `python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium` para receber alertas assim que surgirem, sem aguardar 1 hora.
+2. **Execute dentro de `tmux`, `screen` ou `nohup`** para não depender da sessão aberta.
+   * `tmux new -s futebol` → execute o monitor → `Ctrl+B` seguido de `D` para destacar.
+   * `screen -S futebol` → execute o monitor → `Ctrl+A` seguido de `D` para destacar.
+   * `nohup python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium > monitor.log 2>&1 &` para deixar rodando em segundo plano com log.
 3. **Configure o sistema para iniciar com o computador:**
-   * Linux (systemd): crie `/etc/systemd/system/futebol-bot.service` apontando para o comando acima.
+   * Linux (systemd): use o ficheiro de exemplo `scripts/live_monitor.service.example`, ajuste os caminhos e copie para `/etc/systemd/system/futebol-bot-live.service`.
    * Windows: use o [NSSM](https://nssm.cc/) para transformar o comando em serviço.
 
 Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use um VPS ou serviço na nuvem.
@@ -138,12 +138,12 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 1. Faça upload dos diretórios `python_bot`, `js_bot`, `shared` e do arquivo `shared/competitions.json` para o seu Replit.
 2. No painel **Secrets**, cadastre as variáveis `FOOTBALL_API_KEY`, `TELEGRAM_BOT_TOKEN` etc.
 3. Escolha qual runtime deseja manter:
-   * **Python:** defina o comando de execução para `python -m python_bot.main`.
+   * **Python (recomendado para alertas 24/7):** defina o comando de execução para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium`.
    * **Node:** defina o comando de execução para `node js_bot/index.js`.
 4. Para manter o Replit sempre ativo:
    * Use o plano Hacker (mantém a instância viva) **ou**
    * Configure um ping externo (ex.: UptimeRobot) chamando a webview gerada pelo Replit a cada 5 minutos.
-5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais.
+5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais. Caso use o monitor contínuo, reduza o `--interval` conforme necessário (ex.: 60s) para tornar os avisos mais frequentes sem exceder o limite da API.
 
 > Replit pausa o container após inatividade em contas gratuitas. O ping externo mantém a execução, mas se o processo falhar será necessário abrir o projeto e reiniciar manualmente.
 
