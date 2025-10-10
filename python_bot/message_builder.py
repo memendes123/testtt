@@ -42,6 +42,42 @@ def _escape_join(values: Iterable[object], separator: str = " | ") -> str:
     return separator.join(escaped)
 
 
+def _has_actionable_data(match: Dict[str, object]) -> bool:
+    predictions = match.get("predictions") if isinstance(match, dict) else None
+    probability_keys = (
+        "homeWinProbability",
+        "drawProbability",
+        "awayWinProbability",
+        "over25Probability",
+        "under25Probability",
+        "bttsYesProbability",
+        "bttsNoProbability",
+    )
+    if isinstance(predictions, dict):
+        for key in probability_keys:
+            value = predictions.get(key)
+            try:
+                number = int(value or 0)
+            except (TypeError, ValueError):
+                number = 0
+            if number > 0:
+                return True
+
+    if match.get("recommendedBets"):
+        return True
+    if match.get("analysisNotes"):
+        return True
+    return False
+
+
+def _filter_actionable(matches: Iterable[Dict[str, object]]) -> List[Dict[str, object]]:
+    filtered: List[Dict[str, object]] = []
+    for match in matches or []:
+        if isinstance(match, dict) and _has_actionable_data(match):
+            filtered.append(match)
+    return filtered
+
+
 def _format_match_details(match: Dict[str, object], *, prefix: str) -> List[str]:
     teams = match.get("teams", {})
     home = escape(str((teams.get("home") or {}).get("name") or "Casa"))
@@ -184,11 +220,12 @@ def format_predictions_message(
 
     llm_insights_list = [insight for insight in (llm_insights or []) if isinstance(insight, dict)]
 
-    best_matches = analysis.get("bestMatches", []) or []
+    best_matches_raw = analysis.get("bestMatches", []) or []
+    best_matches = _filter_actionable(best_matches_raw)
     if not best_matches:
         fallback_matches = analysis.get("allMatches") or match_data.get("matches") or []
         if isinstance(fallback_matches, list) and fallback_matches:
-            best_matches = fallback_matches
+            best_matches = _filter_actionable(fallback_matches)
     if best_matches:
         top_matches = best_matches[: min(5, len(best_matches))]
         message_lines.append(f"🔥 <b>TOP GLOBAL ({len(top_matches)})</b>")
@@ -219,7 +256,11 @@ def format_predictions_message(
             message_lines.append("")
 
     regional_matches = analysis.get("bestMatchesByRegion", []) or []
-    detailed_regions = [region for region in regional_matches if region.get("matches")]
+    detailed_regions = []
+    for region in regional_matches:
+        matches = _filter_actionable(region.get("matches", []))
+        if matches:
+            detailed_regions.append({**region, "matches": matches})
     if detailed_regions:
         message_lines.append("🗺️ <b>Lista completa por região/competição:</b>")
         for region in detailed_regions:

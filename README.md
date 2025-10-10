@@ -22,6 +22,7 @@ Este repositório contém duas portas independentes (Python e Node.js) do fluxo 
 | `FOOTBALL_API_BOOKMAKER` | ⚪️ | ID do bookmaker desejado (padrão `6` – Pinnacle). |
 | `FOOTBALL_MAX_FIXTURES` | ⚪️ | Limite de jogos carregados por execução (padrão `120`). |
 | `TELEGRAM_OWNER_ID` | ⚪️ | ID numérico da conta que poderá usar o comando exclusivo `/insight`. |
+| `TELEGRAM_ADMIN_IDS` | ⚪️ | Lista de IDs adicionais (separados por vírgula ou ponto e vírgula) autorizados a usar o `/insight`. |
 | `OPENAI_API_KEY` | ⚪️ | Chave da OpenAI para gerar resumos via ChatGPT (opcional). |
 | `OPENAI_MODEL` | ⚪️ | Modelo da OpenAI a utilizar (padrão `gpt-4o-mini`). |
 
@@ -67,15 +68,26 @@ FOOTBALL_MAX_FIXTURES=120
    * **Windows:** Agendador de Tarefas apontando para `python.exe -m python_bot.main --env C:\caminho\.env`
    * Alternativa embutida: `python -m python_bot.scheduler --env .env --time 00:10 --timezone Europe/Lisbon`
 
-5. **Alertas em jogos ao vivo:**
+5. **Alertas em jogos ao vivo (sem intervalo de 1h):**
    ```bash
-   python -m python_bot.live_monitor --env .env --interval 180 --min-confidence medium
+   python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
    ```
-   O monitor envia apenas novas recomendações ou elevações de confiança para evitar alertas repetidos.
+   Esse processo consulta os jogos em andamento a cada `--interval` segundos (mínimo 30s) e dispara imediatamente qualquer nova análise ou aumento de confiança. Ele é o comando indicado para manter avisos em tempo real sem depender de um loop com `sleep 3600`.
+6. **Ligue tudo com um único comando (monitor ao vivo + `/insight` + relatório diário):**
+   ```bash
+   python -m python_bot.runner start --env .env --interval 120 --min-confidence medium --daily-time 09:30 --daily-timezone Europe/Lisbon
+   ```
+   O runner agora mantém **três** serviços lado a lado: monitor ao vivo, listener `/insight` e o agendador diário responsável por enviar o relatório principal na hora configurada. Cada componente é reiniciado automaticamente se falhar e respeita `Ctrl+C` para encerramento limpo. Prefere outra alcunha? Use o atalho `bash scripts/ligxyz.sh --env .env --interval 120 --daily-time 09:30 --daily-timezone Europe/Lisbon` para obter o mesmo resultado.
+
+   Opções úteis adicionais:
+   * `--daily-chat-id`: envia o relatório diário para um chat diferente dos alertas ao vivo.
+   * `--daily-run-immediately`: dispara o relatório assim que o runner inicia, além do agendamento.
+   * `--no-live`, `--no-owner`, `--no-daily`: desative módulos individualmente conforme a necessidade.
 
 ### Node.js
 
 1. **Instale dependências (Node 18+):** `npm install`
+   *O projeto mantém o `@mastra/core` na série 0.18 para continuar compatível com `@mastra/libsql`. Caso personalize as dependências, mantenha versões < 0.19 ou atualize os dois pacotes em conjunto.*
 2. **Execute o CLI em modo teste:**
    ```bash
    node js_bot/index.js --env .env --dry-run
@@ -95,12 +107,13 @@ FOOTBALL_MAX_FIXTURES=120
 
 Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
 
-1. Defina no `.env`:
+1. Defina no `.env` (pode usar múltiplos admins):
    ```env
    TELEGRAM_OWNER_ID=123456789
+   TELEGRAM_ADMIN_IDS=987654321,111111111
    OPENAI_API_KEY=sk-...
    ```
-   (o `OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado).
+   (`OPENAI_API_KEY` é opcional; sem ele, o resumo GPT não será anexado.)
 2. Inicie o listener dedicado:
    ```bash
    python -m python_bot.owner_command --env .env
@@ -109,7 +122,7 @@ Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
    * `/insight city` → procura o próximo jogo do Manchester City e gera análise completa.
    * `/insight city-psg` → foca no confronto directo entre City e PSG.
 
-O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Apenas o `TELEGRAM_OWNER_ID` configurado pode usar este comando; pedidos de outros utilizadores são recusados automaticamente.
+O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. A pesquisa foi aprimorada para privilegiar correspondências exatas, seleções nacionais e equipas cujo país combine com o termo pesquisado — por exemplo, `/insight portugal` encontra automaticamente o próximo jogo da selecção. Todos os IDs listados em `TELEGRAM_OWNER_ID` e `TELEGRAM_ADMIN_IDS` podem usar o comando; pedidos de outros utilizadores são recusados automaticamente.
 
 ---
 
@@ -117,16 +130,14 @@ O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK 
 
 Se quiser manter o bot emitindo alertas frequentes (ex.: a cada hora) enquanto seu PC está ligado:
 
-1. **Crie um script de loop** (exemplo Python):
-   ```bash
-   while true; do
-     python -m python_bot.main --env /caminho/.env
-     sleep 3600  # aguarda 1 hora
-   done
-   ```
-2. **Execute dentro de `screen` ou `tmux`** para não depender da sessão aberta.
-3. **Configure o sistema para iniciar com o computador:**
-   * Linux (systemd): crie `/etc/systemd/system/futebol-bot.service` apontando para o comando acima.
+1. **Use o monitor contínuo:** rode `python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium` para receber alertas assim que surgirem, sem aguardar 1 hora.
+2. **Prefere iniciar tudo de uma vez?** Rode `bash scripts/ligxyz.sh --env /caminho/.env --interval 120 --daily-time 09:30 --daily-timezone Europe/Lisbon` (ou diretamente `python -m python_bot.runner start ...`). O orquestrador mantém o monitor ao vivo, o listener `/insight` e o relatório diário 100% ativos no mesmo processo, mesmo que feche o terminal.
+3. **Execute dentro de `tmux`, `screen` ou `nohup`** para não depender da sessão aberta.
+   * `tmux new -s futebol` → execute o monitor → `Ctrl+B` seguido de `D` para destacar.
+   * `screen -S futebol` → execute o monitor → `Ctrl+A` seguido de `D` para destacar.
+   * `nohup python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium > monitor.log 2>&1 &` para deixar rodando em segundo plano com log.
+4. **Configure o sistema para iniciar com o computador:**
+   * Linux (systemd): use o ficheiro de exemplo `scripts/live_monitor.service.example`, ajuste os caminhos e copie para `/etc/systemd/system/futebol-bot-live.service`.
    * Windows: use o [NSSM](https://nssm.cc/) para transformar o comando em serviço.
 
 Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use um VPS ou serviço na nuvem.
@@ -138,12 +149,12 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 1. Faça upload dos diretórios `python_bot`, `js_bot`, `shared` e do arquivo `shared/competitions.json` para o seu Replit.
 2. No painel **Secrets**, cadastre as variáveis `FOOTBALL_API_KEY`, `TELEGRAM_BOT_TOKEN` etc.
 3. Escolha qual runtime deseja manter:
-   * **Python:** defina o comando de execução para `python -m python_bot.main`.
+   * **Python (recomendado para alertas 24/7):** defina o comando de execução para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium`.
    * **Node:** defina o comando de execução para `node js_bot/index.js`.
 4. Para manter o Replit sempre ativo:
    * Use o plano Hacker (mantém a instância viva) **ou**
    * Configure um ping externo (ex.: UptimeRobot) chamando a webview gerada pelo Replit a cada 5 minutos.
-5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais.
+5. Ative o modo `--dry-run` durante testes para não enviar mensagens acidentais. Caso use o monitor contínuo, reduza o `--interval` conforme necessário (ex.: 60s) para tornar os avisos mais frequentes sem exceder o limite da API.
 
 > Replit pausa o container após inatividade em contas gratuitas. O ping externo mantém a execução, mas se o processo falhar será necessário abrir o projeto e reiniciar manualmente.
 
@@ -157,6 +168,7 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 * **Notas chave (PK):** para cada destaque são listados até 2 “pontos-chave” baseados na forma das equipas (sequência de vitórias/derrotas, média de golos, confrontos diretos).
 * **Classificação de confiança:** partidas com probabilidades altas geram recomendações "Forte favorito" ou "Favorito". Mercados Over/Under e Ambos Marcam entram na lista caso ultrapassem 60%.
 * **Pontuação e ordenação:** os jogos são reordenados por confiança e quantidade de recomendações, exibindo os melhores primeiro e organizando por região/competição.
+* **Sem ruído de 0%:** partidas que permanecem com probabilidades zeradas após todos os cálculos são ignoradas nos destaques e listas regionais, evitando relatórios vazios no Telegram.
 * **Resumo agregado:** o relatório mostra quantos jogos de alta ou média confiança existem por região, ajudando a priorizar ligas.
 
 Para ver a lógica exata consulte:

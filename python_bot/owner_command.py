@@ -4,6 +4,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
+from threading import Event
 from typing import Optional
 
 import requests
@@ -101,22 +102,29 @@ def build_response_message(match: dict, analysis: dict, gpt_summary: Optional[st
     return "\n".join(lines)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
-    args = parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    logger = logging.getLogger("owner-command")
+def listen_for_owner_commands(
+    settings,
+    *,
+    index=None,
+    poll_interval: int = 5,
+    logger: Optional[logging.Logger] = None,
+    stop_event: Optional[Event] = None,
+):
+    if logger is None:
+        logger = logging.getLogger("owner-command")
+    if index is None:
+        index = load_index()
 
-    try:
-        settings = load_settings(Path(args.env) if args.env else None)
-    except RuntimeError as exc:
-        logger.error("Erro ao carregar configuração: %s", exc)
+    allowed_ids = set(settings.telegram_admin_ids)
+    if settings.telegram_owner_id:
+        allowed_ids.add(str(settings.telegram_owner_id))
+
+    if not allowed_ids:
+        logger.error(
+            "Configure TELEGRAM_OWNER_ID ou TELEGRAM_ADMIN_IDS para usar o comando exclusivo."
+        )
         return 1
 
-    if not settings.telegram_owner_id:
-        logger.error("Configure TELEGRAM_OWNER_ID para usar o comando exclusivo do owner.")
-        return 1
-
-    index = load_index()
     telegram = TelegramClient(settings, logger=logger)
     chatgpt = ChatGPTClient(settings.openai_api_key, settings.openai_model, logger=logger)
 
@@ -124,17 +132,32 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     logger.info("Iniciando listener de comandos do owner")
 
+    def _wait(seconds: int) -> bool:
+        if stop_event:
+            return stop_event.wait(seconds)
+        time.sleep(seconds)
+        return False
+
     while True:
+        if stop_event and stop_event.is_set():
+            logger.info("Encerrando listener de comandos (stop solicitado)")
+            break
         try:
-            params = {"timeout": 55}
+            poll_timeout = max(1, poll_interval)
+            params = {"timeout": poll_timeout}
             if offset is not None:
                 params["offset"] = offset
-            response = requests.get(f"{telegram.base_url}/getUpdates", params=params, timeout=60)
+            response = requests.get(
+                f"{telegram.base_url}/getUpdates",
+                params=params,
+                timeout=max(10, poll_timeout + 5),
+            )
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # noqa: BLE001
             logger.error("Falha ao obter updates do Telegram: %s", exc)
-            time.sleep(max(1, args.poll_interval))
+            if _wait(max(1, poll_interval)):
+                break
             continue
 
         for update in payload.get("result", []) or []:
@@ -149,9 +172,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not command:
                 continue
 
-            if str(message.get("from", {}).get("id")) != str(settings.telegram_owner_id):
-                telegram.send_message("Este comando é reservado ao owner.", chat_id=str(chat_id))
-                logger.info("Comando ignorado por utilizador não autorizado", extra={"chatId": chat_id})
+            sender_id = str(message.get("from", {}).get("id"))
+            if sender_id not in allowed_ids:
+                telegram.send_message(
+                    "Este comando é reservado ao owner/administradores autorizados.",
+                    chat_id=str(chat_id),
+                )
+                logger.info(
+                    "Comando ignorado por utilizador não autorizado",
+                    extra={"chatId": chat_id},
+                )
                 continue
 
             _, query = command
@@ -197,6 +227,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             message_text = build_response_message(match, match_analysis, gpt_summary)
             telegram.send_message(message_text, chat_id=str(chat_id))
 
+    return 0
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+    logger = logging.getLogger("owner-command")
+
+    try:
+        settings = load_settings(Path(args.env) if args.env else None)
+    except RuntimeError as exc:
+        logger.error("Erro ao carregar configuração: %s", exc)
+        return 1
+
+    try:
+        listen_for_owner_commands(
+            settings,
+            index=load_index(),
+            poll_interval=args.poll_interval,
+            logger=logger,
+        )
+    except KeyboardInterrupt:
+        logger.info("Listener interrompido pelo utilizador")
     return 0
 
 
