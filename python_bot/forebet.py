@@ -180,14 +180,14 @@ class ForebetClient:
         return results
 
     def _parse_without_bs4(self, html: str) -> Dict[str, ForebetProbabilities]:
-        table_pattern = re.compile(r"<tr[^>]*>([\\s\\S]*?)</tr>", re.IGNORECASE)
-        cell_pattern = re.compile(r"<td[^>]*>([\\s\\S]*?)</td>", re.IGNORECASE)
+        table_pattern = re.compile(r"<tr[^>]*>([\s\S]*?)</tr>", re.IGNORECASE)
+        cell_pattern = re.compile(r"<td[^>]*>([\s\S]*?)</td>", re.IGNORECASE)
         home_pattern = re.compile(
-            r'class="[^"]*(?:home|tnms|team1)[^"]*"[^>]*>([\\s\\S]*?)</td>',
+            r'class="[^"]*(?:home|tnms|team1)[^"]*"[^>]*>([\s\S]*?)</td>',
             re.IGNORECASE,
         )
         away_pattern = re.compile(
-            r'class="[^"]*(?:away|tnms2|team2)[^"]*"[^>]*>([\\s\\S]*?)</td>',
+            r'class="[^"]*(?:away|tnms2|team2)[^"]*"[^>]*>([\s\S]*?)</td>',
             re.IGNORECASE,
         )
 
