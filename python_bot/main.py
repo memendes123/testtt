@@ -11,6 +11,7 @@ from .analyzer import analyze_matches
 from .competitions import load_index
 from .config import load_settings
 from .fetcher import FetchError, fetch_matches
+from .llm import ChatGPTClient
 from .message_builder import format_predictions_message
 from .telegram_client import TelegramClient
 
@@ -57,13 +58,41 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     analysis = analyze_matches(match_data["matches"], index, logger=logger)
-    message = format_predictions_message(match_data, analysis)
+
+    chatgpt = ChatGPTClient(settings.openai_api_key, settings.openai_model, logger=logger)
+    llm_insights: list[dict] = []
+    should_request_llm = (
+        chatgpt.is_configured()
+        and analysis.get("totalAnalyzed", 0) > 0
+        and analysis.get("highConfidenceCount", 0) == 0
+        and analysis.get("mediumConfidenceCount", 0) == 0
+    )
+
+    if should_request_llm:
+        logger.info("No medium/high confidence picks found, requesting ChatGPT summaries")
+        candidates = analysis.get("bestMatches") or analysis.get("allMatches") or []
+        for match in candidates[:3]:
+            context = {
+                "teams": match.get("teams"),
+                "competition": match.get("competition"),
+                "predictions": match.get("predictions"),
+                "recommendedBets": match.get("recommendedBets"),
+                "analysisNotes": match.get("analysisNotes"),
+                "confidence": match.get("confidence"),
+                "kickoff": match.get("date"),
+            }
+            summary = chatgpt.summarize_match(context)
+            if summary:
+                llm_insights.append({"match": match, "summary": summary})
+
+    message = format_predictions_message(match_data, analysis, llm_insights=llm_insights)
 
     result = {
         "success": True,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "matchData": match_data,
         "analysis": analysis,
+        "llmInsights": llm_insights,
         "message": message,
     }
 
