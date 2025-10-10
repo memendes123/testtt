@@ -65,7 +65,7 @@ Para receber alertas em tempo real quando surgirem novas recomendações durante
 python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
 ```
 
-O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico. Ajuste o intervalo conforme o limite da sua API; valores entre 60 e 180 segundos equilibram bem resposta rápida e consumo de requests.
+O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
 
 Para manter o monitor sempre disponível num servidor Linux com systemd:
 
@@ -79,32 +79,3 @@ Para manter o monitor sempre disponível num servidor Linux com systemd:
    ```
 
 O serviço reinicia automaticamente o monitor em caso de falha ou reboot.
-
-## Mantendo o monitor ligado depois de fechar o terminal
-
-Caso esteja numa VPS, Replit ou qualquer ambiente em que fechar o navegador encerra a sessão interativa, use uma das abordagens abaixo para manter o processo ativo:
-
-### `tmux` / `screen`
-
-```bash
-tmux new -s futebol
-python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium
-# Pressione Ctrl+B depois D para destacar e deixar rodando
-```
-
-Para voltar, use `tmux attach -t futebol`. O mesmo fluxo funciona com `screen` (`screen -S futebol` … `Ctrl+A` + `D`).
-
-### `nohup`
-
-```bash
-nohup python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium > monitor.log 2>&1 &
-```
-
-O comando continua ativo mesmo após encerrar a shell, e os logs ficam em `monitor.log`. Verifique o processo com `ps aux | grep live_monitor` e encerre usando `kill <PID>` quando desejar.
-
-### Replit (sempre on)
-
-1. No painel **Run**, configure o comando para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium`.
-2. Cadastre as variáveis na aba **Secrets**.
-3. Ative um ping externo (UptimeRobot, BetterStack etc.) ou contrate o plano Always On para evitar que o container hiberne.
-4. Use a aba **Shell** apenas para depuração; mesmo que feche o navegador, o processo configurado no botão Run continuará ativo.
