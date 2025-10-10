@@ -73,16 +73,6 @@ FOOTBALL_MAX_FIXTURES=120
    python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
    ```
    Esse processo consulta os jogos em andamento a cada `--interval` segundos (mínimo 30s) e dispara imediatamente qualquer nova análise ou aumento de confiança. Ele é o comando indicado para manter avisos em tempo real sem depender de um loop com `sleep 3600`.
-6. **Ligue tudo com um único comando (monitor ao vivo + `/insight` + relatório diário):**
-   ```bash
-   python -m python_bot.runner start --env .env --interval 120 --min-confidence medium --daily-time 09:30 --daily-timezone Europe/Lisbon
-   ```
-   O runner agora mantém **três** serviços lado a lado: monitor ao vivo, listener `/insight` e o agendador diário responsável por enviar o relatório principal na hora configurada. Cada componente é reiniciado automaticamente se falhar e respeita `Ctrl+C` para encerramento limpo. Prefere outra alcunha? Use o atalho `bash scripts/ligxyz.sh --env .env --interval 120 --daily-time 09:30 --daily-timezone Europe/Lisbon` para obter o mesmo resultado.
-
-   Opções úteis adicionais:
-   * `--daily-chat-id`: envia o relatório diário para um chat diferente dos alertas ao vivo.
-   * `--daily-run-immediately`: dispara o relatório assim que o runner inicia, além do agendamento.
-   * `--no-live`, `--no-owner`, `--no-daily`: desative módulos individualmente conforme a necessidade.
 
 ### Node.js
 
@@ -122,7 +112,7 @@ Quando quiser pedir uma análise sob demanda directamente pelo Telegram:
    * `/insight city` → procura o próximo jogo do Manchester City e gera análise completa.
    * `/insight city-psg` → foca no confronto directo entre City e PSG.
 
-O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. A pesquisa foi aprimorada para privilegiar correspondências exatas, seleções nacionais e equipas cujo país combine com o termo pesquisado — por exemplo, `/insight portugal` encontra automaticamente o próximo jogo da selecção. Todos os IDs listados em `TELEGRAM_OWNER_ID` e `TELEGRAM_ADMIN_IDS` podem usar o comando; pedidos de outros utilizadores são recusados automaticamente.
+O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK e, se configurado, um resumo em linguagem natural vindo do ChatGPT. Todos os IDs listados em `TELEGRAM_OWNER_ID` e `TELEGRAM_ADMIN_IDS` podem usar o comando; pedidos de outros utilizadores são recusados automaticamente.
 
 ---
 
@@ -131,12 +121,11 @@ O bot devolve as probabilidades calculadas, recomendações do modelo, notas PK 
 Se quiser manter o bot emitindo alertas frequentes (ex.: a cada hora) enquanto seu PC está ligado:
 
 1. **Use o monitor contínuo:** rode `python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium` para receber alertas assim que surgirem, sem aguardar 1 hora.
-2. **Prefere iniciar tudo de uma vez?** Rode `bash scripts/ligxyz.sh --env /caminho/.env --interval 120 --daily-time 09:30 --daily-timezone Europe/Lisbon` (ou diretamente `python -m python_bot.runner start ...`). O orquestrador mantém o monitor ao vivo, o listener `/insight` e o relatório diário 100% ativos no mesmo processo, mesmo que feche o terminal.
-3. **Execute dentro de `tmux`, `screen` ou `nohup`** para não depender da sessão aberta.
+2. **Execute dentro de `tmux`, `screen` ou `nohup`** para não depender da sessão aberta.
    * `tmux new -s futebol` → execute o monitor → `Ctrl+B` seguido de `D` para destacar.
    * `screen -S futebol` → execute o monitor → `Ctrl+A` seguido de `D` para destacar.
    * `nohup python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium > monitor.log 2>&1 &` para deixar rodando em segundo plano com log.
-4. **Configure o sistema para iniciar com o computador:**
+3. **Configure o sistema para iniciar com o computador:**
    * Linux (systemd): use o ficheiro de exemplo `scripts/live_monitor.service.example`, ajuste os caminhos e copie para `/etc/systemd/system/futebol-bot-live.service`.
    * Windows: use o [NSSM](https://nssm.cc/) para transformar o comando em serviço.
 

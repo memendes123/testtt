@@ -1,4 +1,4 @@
-"""Utilities to start the live monitor, owner command and daily scheduler together."""
+"""Utilities to start the live monitor and owner command together."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,6 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from . import scheduler
 from .config import load_settings
 from .live_monitor import LiveMonitor
 from .owner_command import listen_for_owner_commands
@@ -45,36 +44,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=15,
         help="Tempo (s) antes de reiniciar um serviço que caiu",
     )
-    parser.add_argument(
-        "--daily-time",
-        help="Horário diário para o relatório principal (HH:MM)",
-        default=None,
-    )
-    parser.add_argument(
-        "--daily-timezone",
-        help="Timezone IANA para o agendamento diário (padrão UTC)",
-        default=None,
-    )
-    parser.add_argument(
-        "--daily-chat-id",
-        help="Chat ID específico para as análises diárias",
-        default=None,
-    )
-    parser.add_argument(
-        "--daily-run-immediately",
-        action="store_true",
-        help="Executa o relatório diário imediatamente ao iniciar",
-    )
     parser.add_argument("--no-live", action="store_true", help="Não iniciar o monitor ao vivo")
     parser.add_argument(
         "--no-owner",
         action="store_true",
         help="Não iniciar o listener de comandos do owner",
-    )
-    parser.add_argument(
-        "--no-daily",
-        action="store_true",
-        help="Não iniciar o scheduler diário de análises",
     )
     parser.add_argument("--dry-run", action="store_true", help="Não enviar alertas ao Telegram")
     parser.add_argument("--verbose", action="store_true", help="Ativa logs detalhados")
@@ -150,48 +124,10 @@ def _launch_owner_listener(
             break
 
 
-def _launch_daily_scheduler(
-    *,
-    args: argparse.Namespace,
-    stop_event: threading.Event,
-) -> None:
-    logger = logging.getLogger("python-bot.scheduler")
-    cli_args: list[str] = []
-    if args.env:
-        cli_args.extend(["--env", args.env])
-    daily_chat = args.daily_chat_id or args.chat_id
-    if daily_chat:
-        cli_args.extend(["--chat-id", daily_chat])
-    if args.daily_time:
-        cli_args.extend(["--time", args.daily_time])
-    if args.daily_timezone:
-        cli_args.extend(["--timezone", args.daily_timezone])
-    if args.dry_run:
-        cli_args.append("--dry-run")
-    if args.daily_run_immediately:
-        cli_args.append("--run-immediately")
-    if args.verbose:
-        cli_args.append("--verbose")
-
-    while not stop_event.is_set():
-        scheduler_args = scheduler.parse_args(cli_args)
-        try:
-            scheduler.schedule_daily(scheduler_args, stop_event=stop_event)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "Scheduler diário terminou com erro. A reiniciar em %ss",
-                args.restart_delay,
-            )
-            if stop_event.wait(max(1, args.restart_delay)):
-                break
-        else:
-            break
-
-
 def start_services(args: argparse.Namespace) -> int:
-    if args.no_live and args.no_owner and args.no_daily:
+    if args.no_live and args.no_owner:
         logging.getLogger("python-bot.runner").error(
-            "Nenhum serviço selecionado. Desative apenas um entre --no-live, --no-owner ou --no-daily."
+            "Nenhum serviço selecionado. Desative apenas um entre --no-live ou --no-owner."
         )
         return 1
 
@@ -224,15 +160,6 @@ def start_services(args: argparse.Namespace) -> int:
         )
         threads.append(owner_thread)
         owner_thread.start()
-
-    if not args.no_daily:
-        daily_thread = threading.Thread(
-            target=_launch_daily_scheduler,
-            kwargs={"args": args, "stop_event": stop_event},
-            daemon=True,
-        )
-        threads.append(daily_thread)
-        daily_thread.start()
 
     if not threads:
         logging.getLogger("python-bot.runner").warning("Nenhum serviço foi iniciado")

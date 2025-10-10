@@ -67,7 +67,7 @@ Para receber alertas em tempo real quando surgirem novas recomendações durante
 python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
 ```
 
-O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico. Ajuste o intervalo conforme o limite da sua API; valores entre 60 e 180 segundos equilibram bem resposta rápida e consumo de requests.
+O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
 
 Para manter o monitor sempre disponível num servidor Linux com systemd:
 
@@ -81,68 +81,3 @@ Para manter o monitor sempre disponível num servidor Linux com systemd:
    ```
 
 O serviço reinicia automaticamente o monitor em caso de falha ou reboot.
-
-## Iniciar monitor + relatório diário + comandos privados com um único processo
-
-Se quiser deixar os alertas ao vivo, o relatório diário e o comando `/insight` disponíveis sem abrir várias shells, utilize o orquestrador incluído em `python_bot.runner`:
-
-```bash
-python -m python_bot.runner start --env .env --interval 120 --min-confidence medium --daily-time 09:30 --daily-timezone Europe/Lisbon
-```
-
-O comando acima inicia o monitor contínuo, o listener de comandos privados e o scheduler diário simultaneamente. Os três serviços são reiniciados automaticamente em caso de falha e podem ser encerrados com `Ctrl+C`. Opções úteis:
-
-- `--daily-time` / `--daily-timezone`: ajustam o horário e o fuso utilizados pelo relatório diário (padrão `00:10 UTC`).
-- `--daily-chat-id`: envia o relatório diário para um destino diferente dos alertas ao vivo.
-- `--daily-run-immediately`: dispara o relatório assim que o runner sobe, além do horário agendado.
-- `--no-live`, `--no-owner`, `--no-daily`: iniciam somente os componentes desejados.
-- `--restart-delay`: controla a pausa antes de reiniciar um serviço que caiu (padrão 15s).
-- `--owner-poll-interval`: define a cadência de leitura de mensagens privadas (padrão 5s).
-
-Para uma experiência "liga tudo" basta invocar o script auxiliar:
-
-```bash
-bash scripts/ligxyz.sh --env .env --interval 120 --min-confidence medium --daily-time 09:30 --daily-timezone Europe/Lisbon
-```
-
-Ele ativa automaticamente a `venv` localizada em `.venv` (quando existir) e chama o runner com os parâmetros fornecidos, mantendo o bot ligado mesmo após fechar o terminal.
-
-## Mantendo o monitor ligado depois de fechar o terminal
-
-Caso esteja numa VPS, Replit ou qualquer ambiente em que fechar o navegador encerra a sessão interativa, use uma das abordagens abaixo para manter o processo ativo:
-
-### `tmux` / `screen`
-
-```bash
-tmux new -s futebol
-python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium
-# Pressione Ctrl+B depois D para destacar e deixar rodando
-```
-
-Para voltar, use `tmux attach -t futebol`. O mesmo fluxo funciona com `screen` (`screen -S futebol` … `Ctrl+A` + `D`).
-
-### `nohup`
-
-```bash
-nohup python -m python_bot.live_monitor --env /caminho/.env --interval 120 --min-confidence medium > monitor.log 2>&1 &
-```
-
-O comando continua ativo mesmo após encerrar a shell, e os logs ficam em `monitor.log`. Verifique o processo com `ps aux | grep live_monitor` e encerre usando `kill <PID>` quando desejar.
-
-### Replit (sempre on)
-
-1. No painel **Run**, configure o comando para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium`.
-2. Cadastre as variáveis na aba **Secrets**.
-3. Ative um ping externo (UptimeRobot, BetterStack etc.) ou contrate o plano Always On para evitar que o container hiberne.
-4. Use a aba **Shell** apenas para depuração; mesmo que feche o navegador, o processo configurado no botão Run continuará ativo.
-
-## Comando `/insight` e pesquisas manuais
-
-O listener privado (`python_bot.owner_command`) continua disponível para atender pedidos específicos via Telegram. Configure `TELEGRAM_OWNER_ID` e/ou `TELEGRAM_ADMIN_IDS` no `.env` e, após iniciar o runner ou o comando individual, envie mensagens como:
-
-```
-/insight portugal
-/insight porto-benfica
-```
-
-O bot agora prioriza correspondências exatas, seleções nacionais e equipas cujo país coincide com o termo pesquisado, tornando mais fácil obter jogos da selecção portuguesa ou de equipas com nomes parecidos. Caso o adversário seja omitido, ele procura automaticamente o próximo jogo agendado pela equipa encontrada.
