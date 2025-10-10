@@ -57,6 +57,8 @@ Argumentos úteis:
 - `--time HH:MM`: ajusta o horário alvo (padrão `00:10`).
 - `--timezone`: fuso IANA usado para calcular o horário local (padrão `UTC`).
 
+> Os relatórios automáticos ignoram partidas que permaneçam com probabilidades zeradas, evitando mensagens com "0%" no Telegram.
+
 ## Monitor de jogos ao vivo
 
 Para receber alertas em tempo real quando surgirem novas recomendações durante as partidas, utilize o módulo `python_bot.live_monitor`:

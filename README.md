@@ -157,6 +157,7 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 * **Notas chave (PK):** para cada destaque são listados até 2 “pontos-chave” baseados na forma das equipas (sequência de vitórias/derrotas, média de golos, confrontos diretos).
 * **Classificação de confiança:** partidas com probabilidades altas geram recomendações "Forte favorito" ou "Favorito". Mercados Over/Under e Ambos Marcam entram na lista caso ultrapassem 60%.
 * **Pontuação e ordenação:** os jogos são reordenados por confiança e quantidade de recomendações, exibindo os melhores primeiro e organizando por região/competição.
+* **Sem ruído de 0%:** partidas que permanecem com probabilidades zeradas após todos os cálculos são ignoradas nos destaques e listas regionais, evitando relatórios vazios no Telegram.
 * **Resumo agregado:** o relatório mostra quantos jogos de alta ou média confiança existem por região, ajudando a priorizar ligas.
 
 Para ver a lógica exata consulte:

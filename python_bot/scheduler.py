@@ -5,7 +5,8 @@ import logging
 import time
 from datetime import date as date_cls
 from datetime import datetime, time as time_cls, timedelta
-from typing import List, Optional
+from threading import Event
+from typing import Callable, List, Optional
 
 try:  # Python 3.9+
     from zoneinfo import ZoneInfo
@@ -92,8 +93,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    args = parse_args(argv)
+def schedule_daily(
+    args: argparse.Namespace,
+    *,
+    stop_event: Optional[Event] = None,
+    now_fn: Optional[Callable[[], datetime]] = None,
+) -> int:
     _configure_logging(args.verbose)
     logger = logging.getLogger("python-bot.scheduler")
 
@@ -108,6 +113,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.warning("zoneinfo não disponível; utilizando horário local do sistema")
 
     def _now() -> datetime:
+        if now_fn:
+            return now_fn()
         current = datetime.now(tz) if tz else datetime.now()
         return current
 
@@ -115,15 +122,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         run_date = run_dt.date()
         bot_args = _build_args(args, run_date)
         logger.info("Executando bot para %s", run_date.isoformat())
-        exit_code = run_once(bot_args)
+        try:
+            exit_code = run_once(bot_args)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha inesperada durante a execução diária", exc_info=exc)
+            return
         if exit_code != 0:
             logger.error("Execução retornou código %s", exit_code)
 
     if args.run_immediately:
         logger.info("Execução imediata solicitada")
         _execute(_now())
+        if stop_event and stop_event.is_set():
+            logger.info("Sinal de paragem recebido após execução imediata")
+            return 0
 
     while True:
+        if stop_event and stop_event.is_set():
+            logger.info("Sinal de paragem recebido. Scheduler a terminar.")
+            return 0
         now = _now()
         target = _next_run(now, args.time)
         wait_seconds = max(1, int((target - now).total_seconds()))
@@ -133,11 +150,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             wait_seconds / 60,
         )
         try:
-            time.sleep(wait_seconds)
+            if stop_event:
+                triggered = stop_event.wait(wait_seconds)
+                if triggered:
+                    logger.info("Scheduler interrompido antes do próximo ciclo")
+                    return 0
+            else:
+                time.sleep(wait_seconds)
         except KeyboardInterrupt:  # pragma: no cover - interação manual
             logger.info("Scheduler interrompido pelo utilizador")
             return 0
         _execute(target)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_args(argv)
+    return schedule_daily(args)
 
 
 if __name__ == "__main__":
