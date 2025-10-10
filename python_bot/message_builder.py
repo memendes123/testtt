@@ -80,7 +80,59 @@ def _format_match_details(match: Dict[str, object], *, prefix: str) -> List[str]
     return lines
 
 
-def format_predictions_message(match_data: Dict[str, object], analysis: Dict[str, object]) -> str:
+def _format_llm_insights(insights: Iterable[Dict[str, object]]) -> List[str]:
+    lines: List[str] = []
+
+    for insight in insights:
+        match = insight.get("match") if isinstance(insight, dict) else None
+        summary = (insight or {}).get("summary") if isinstance(insight, dict) else None
+
+        if not isinstance(summary, str) or not summary.strip():
+            continue
+
+        teams = match.get("teams", {}) if isinstance(match, dict) else {}
+        home = escape(str((teams.get("home") or {}).get("name") or "Casa"))
+        away = escape(str((teams.get("away") or {}).get("name") or "Fora"))
+
+        competition = match.get("competition", {}) if isinstance(match, dict) else {}
+        league = competition.get("name")
+        if not league and isinstance(match, dict):
+            league = (match.get("league") or {}).get("name")
+        league_label = escape(str(league)) if league else ""
+
+        time_value = ""
+        if isinstance(match, dict):
+            time_value = match.get("time") or ""
+
+        header = f"🤖 <b>{home} vs {away}</b>"
+        lines.append(header)
+
+        details: List[str] = []
+        if time_value:
+            details.append(f"⏰ {escape(str(time_value))}")
+        if league_label:
+            details.append(f"🏆 {league_label}")
+        if details:
+            lines.append(f"↳ {' | '.join(details)}")
+
+        summary_lines = [escape(part.strip()) for part in summary.splitlines() if part.strip()]
+        if summary_lines:
+            lines.append(f"↳ {' '.join(summary_lines)}")
+
+        lines.append("")
+
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    return lines
+
+
+def format_predictions_message(
+    match_data: Dict[str, object],
+    analysis: Dict[str, object],
+    *,
+    llm_insights: Optional[Iterable[Dict[str, object]]] = None,
+) -> str:
     date_str = match_data.get("date")
     try:
         formatted_date = datetime.fromisoformat(str(date_str)).strftime("%d/%m/%Y")
@@ -110,6 +162,8 @@ def format_predictions_message(match_data: Dict[str, object], analysis: Dict[str
             message_lines.append(f"• {label}: {total} jogos ({high} alta | {medium} média)")
         message_lines.append("")
 
+    llm_insights_list = [insight for insight in (llm_insights or []) if isinstance(insight, dict)]
+
     best_matches = analysis.get("bestMatches", []) or []
     if best_matches:
         top_matches = best_matches[: min(5, len(best_matches))]
@@ -125,11 +179,20 @@ def format_predictions_message(match_data: Dict[str, object], analysis: Dict[str
                 lines.insert(1, f"↳ ⏰ {escape(str(time_value))} | 🏆 {escape(str(league_label or 'Horário a definir'))}")
             message_lines.extend(lines)
             message_lines.append("")
-    else:
+    elif not llm_insights_list:
         message_lines.append("😔 <b>Não há jogos com odds interessantes hoje.</b>")
         message_lines.append("Voltamos amanhã com mais análises!")
         message_lines.append("")
         message_lines.append("📈 Tip: Verifique os jogos ao vivo durante o dia para oportunidades em tempo real.")
+
+    if llm_insights_list:
+        insight_lines = _format_llm_insights(llm_insights_list)
+        if insight_lines:
+            if message_lines and message_lines[-1] != "":
+                message_lines.append("")
+            message_lines.append("🤖 <b>Insights gerados pelo ChatGPT para jogos equilibrados</b>")
+            message_lines.extend(insight_lines)
+            message_lines.append("")
 
     regional_matches = analysis.get("bestMatchesByRegion", []) or []
     detailed_regions = [region for region in regional_matches if region.get("matches")]
