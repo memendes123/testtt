@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from html import unescape
 from dataclasses import dataclass
 from datetime import datetime
+from html import unescape
 from typing import Dict, Optional, cast
 
 import requests

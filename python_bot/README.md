@@ -16,15 +16,26 @@ FOOTBALL_API_BOOKMAKER=6
 FOOTBALL_MAX_FIXTURES=120
 TELEGRAM_OWNER_ID=123456789
 TELEGRAM_ADMIN_IDS=987654321,111111111
+TELEGRAM_MESSAGE_INTERVAL_SECONDS=120
 ```
 
 2. Install dependencies (Python 3.11+ recommended):
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r python_bot/requirements.txt
-```
+   *Linux/macOS*
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r python_bot/requirements.txt
+   ```
+
+   *Windows (PowerShell)*
+
+   ```powershell
+   py -m venv .venv
+   .venv\Scripts\Activate.ps1
+   py -m pip install -r python_bot/requirements.txt
+   ```
 
 3. Run a dry run for today (no Telegram message is sent):
 
@@ -67,7 +78,7 @@ Para receber alertas em tempo real quando surgirem novas recomendações durante
 python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
 ```
 
-O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
+O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Para evitar spam, cada jogo envia no máximo duas análises e há um atraso mínimo entre mensagens (padrão 120 segundos, configurável via `TELEGRAM_MESSAGE_INTERVAL_SECONDS`). Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
 
 Para manter o monitor sempre disponível num servidor Linux com systemd:
 
@@ -81,3 +92,12 @@ Para manter o monitor sempre disponível num servidor Linux com systemd:
    ```
 
 O serviço reinicia automaticamente o monitor em caso de falha ou reboot.
+
+## Fontes de dados e limites
+
+O bot combina duas origens principais de informação:
+
+- **API-Football (API-Sports)**: fornece os fixtures, estatísticas recentes, odds e histórico de confrontos. É necessário um token válido em `FOOTBALL_API_KEY`.
+- **Forebet**: usado para complementar com probabilidades de resultado, over/under e BTTS.
+
+Cada chamada à API-Football consome quota do plano contratado. Para evitar bloqueios após algumas dezenas de minutos, o código mantém um cache em memória para formulários de equipa, confrontos diretos e odds durante alguns minutos. Mesmo assim, intervalos muito curtos ou um número elevado de competições podem exceder os limites do plano gratuito; aumente o `--interval` ou reduza `FOOTBALL_MAX_FIXTURES` caso continue a receber mensagens de "Rate limit" nos logs.
