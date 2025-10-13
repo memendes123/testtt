@@ -9,7 +9,11 @@ import requests
 
 from .competitions import CompetitionIndex
 from .config import Settings
-from .fetcher import _summarize_head_to_head, _summarize_team_form  # type: ignore
+from .fetcher import (  # type: ignore
+    _normalize_api_football_prediction,
+    _summarize_head_to_head,
+    _summarize_team_form,
+)
 from .forebet import ForebetClient
 
 API_BASE = "https://v3.football.api-sports.io"
@@ -233,6 +237,7 @@ def _build_match_entry(
         raise ValueError("fixture_id ausente no payload")
 
     odds = _fetch_odds(int(fixture_id), settings, logger)
+    api_football_prediction = _fetch_prediction(int(fixture_id), settings, logger)
 
     league = fixture.get("league", {}) or {}
     competition = index.identify(league)
@@ -316,6 +321,7 @@ def _build_match_entry(
         "venue": ((fixture_info.get("venue") or {}) or {}).get("name") or "TBD",
         "odds": odds,
         "forebet": forebet_data,
+        "apiFootballPrediction": api_football_prediction,
         "form": {
             "home": home_form,
             "away": away_form,
@@ -362,6 +368,29 @@ def _fetch_head_to_head_matches(
             extra={"homeId": home_id, "awayId": away_id, "error": str(exc)},
         )
         return []
+
+
+def _fetch_prediction(fixture_id: int, settings: Settings, logger: logging.Logger) -> Optional[Dict[str, object]]:
+    try:
+        response = requests.get(
+            f"{API_BASE}/predictions",
+            params={"fixture": fixture_id},
+            headers=_headers(settings),
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Falha ao obter previsão API-FOOTBALL",
+            extra={"fixtureId": fixture_id, "error": str(exc)},
+        )
+        return None
+
+    entries = payload.get("response", []) or []
+    if not entries:
+        return None
+    return _normalize_api_football_prediction(entries[0])
 
 
 def locate_fixture(
