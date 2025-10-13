@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -22,10 +23,12 @@ _CACHE_LOCK = threading.Lock()
 _TEAM_FORM_CACHE: Dict[int, Tuple[float, Optional[Dict[str, object]]]] = {}
 _HEAD_TO_HEAD_CACHE: Dict[Tuple[int, int], Tuple[float, Optional[Dict[str, object]]]] = {}
 _ODDS_CACHE: Dict[int, Tuple[float, List[Dict[str, object]]]] = {}
+_PREDICTIONS_CACHE: Dict[int, Tuple[float, Optional[Dict[str, object]]]] = {}
 
 _TEAM_FORM_TTL = 60 * 10  # 10 minutos
 _HEAD_TO_HEAD_TTL = 60 * 15  # 15 minutos
 _ODDS_TTL = 60 * 5  # 5 minutos
+_PREDICTIONS_TTL = 60 * 15  # 15 minutos
 
 
 def _prune_cache(cache: Dict[object, Tuple[float, object]], *, now: Optional[float] = None) -> None:
@@ -59,6 +62,93 @@ def _cache_get(
             _prune_cache(cache, now=now)
 
     return value
+
+
+def _parse_float(value: Optional[object]) -> Optional[float]:
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", "."))
+    if not match:
+        return None
+
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def _parse_percentage(value: Optional[object]) -> Optional[int]:
+    if value is None:
+        return None
+
+    parsed = _parse_float(value)
+    if parsed is None:
+        return None
+
+    number = int(round(parsed))
+
+    if number < 0:
+        return 0
+    if number > 100:
+        return 100
+    return number
+
+
+def _normalize_api_football_prediction(payload: Optional[Dict[str, object]]) -> Optional[Dict[str, object]]:
+    if not isinstance(payload, dict) or not payload:
+        return None
+
+    prediction = payload.get("prediction") or payload.get("predictions")
+    if not isinstance(prediction, dict):
+        return None
+
+    percent_data = prediction.get("percent") or prediction.get("percentages") or {}
+    home_pct = _parse_percentage((percent_data or {}).get("home"))
+    draw_pct = _parse_percentage((percent_data or {}).get("draw"))
+    away_pct = _parse_percentage((percent_data or {}).get("away"))
+
+    goals = prediction.get("goals") if isinstance(prediction.get("goals"), dict) else {}
+    winner = prediction.get("winner") if isinstance(prediction.get("winner"), dict) else {}
+
+    comparison = payload.get("comparison") if isinstance(payload.get("comparison"), dict) else {}
+    normalized_comparison: Dict[str, Dict[str, Optional[int]]] = {}
+    for key, value in (comparison or {}).items():
+        if not isinstance(value, dict):
+            continue
+        normalized_comparison[key] = {
+            "home": _parse_percentage(value.get("home")),
+            "away": _parse_percentage(value.get("away")),
+        }
+
+    normalized = {
+        "source": "API-FOOTBALL",
+        "homeWinProbability": home_pct,
+        "drawProbability": draw_pct,
+        "awayWinProbability": away_pct,
+        "advice": prediction.get("advice"),
+        "underOver": prediction.get("under_over"),
+        "winOrDraw": prediction.get("win_or_draw"),
+        "predictedGoals": {
+            "home": _parse_float(goals.get("home")) if isinstance(goals, dict) else None,
+            "away": _parse_float(goals.get("away")) if isinstance(goals, dict) else None,
+        },
+        "winner": {
+            "id": winner.get("id") if isinstance(winner, dict) else None,
+            "name": winner.get("name") if isinstance(winner, dict) else None,
+            "comment": winner.get("comment") if isinstance(winner, dict) else None,
+        },
+        "comparison": normalized_comparison or None,
+    }
+
+    return normalized
 
 
 def _request_with_retry(
@@ -197,6 +287,31 @@ def _fetch_odds(
         {"name": market_name, "values": values}
         for market_name, values in seen_markets.items()
     ]
+
+
+def _fetch_predictions(
+    fixture_id: int,
+    headers: Dict[str, str],
+    logger: Optional[logging.Logger],
+) -> Optional[Dict[str, object]]:
+    response = _request_with_retry(
+        "https://v3.football.api-sports.io/predictions",
+        params={"fixture": fixture_id},
+        headers=headers,
+        logger=logger,
+    )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    payload = response.json()
+
+    entries = payload.get("response")
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    normalized = _normalize_api_football_prediction(entries[0])
+    time.sleep(0.1)
+    return normalized
 
 
 def _extract_score(fixture: Dict[str, object]) -> Tuple[int, int]:
@@ -540,6 +655,28 @@ def fetch_matches(
             _remember_failure(_ODDS_CACHE, fixture_id)
             odds_data = []
 
+        try:
+            api_football_prediction = _cache_get(
+                _PREDICTIONS_CACHE,
+                fixture_id,
+                _PREDICTIONS_TTL,
+                lambda: _fetch_predictions(fixture_id, headers, logger),
+            )
+        except FetchError as exc:
+            logger.warning(
+                "Rate limit while fetching API-FOOTBALL predictions",
+                extra={"fixtureId": fixture_id, "error": str(exc)},
+            )
+            _remember_failure(_PREDICTIONS_CACHE, fixture_id, ttl=180)
+            api_football_prediction = None
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning(
+                "Failed to fetch API-FOOTBALL predictions",
+                extra={"fixtureId": fixture_id, "error": str(exc)},
+            )
+            _remember_failure(_PREDICTIONS_CACHE, fixture_id)
+            api_football_prediction = None
+
         date_str = fixture_info.get("date")
         time_str = ""
         if isinstance(date_str, str):
@@ -604,6 +741,7 @@ def fetch_matches(
             "venue": fixture_info.get("venue", {}).get("name") or "TBD",
             "odds": odds_data,
             "forebet": forebet_data,
+            "apiFootballPrediction": api_football_prediction,
             "status": fixture_info.get("status"),
             "score": {
                 "home": (fixture.get("goals") or {}).get("home"),
