@@ -6,7 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
-from typing import Dict, Optional, cast
+from typing import Dict, Optional, cast, Literal
 
 import requests
 
@@ -326,7 +326,6 @@ class ForebetClient:
 
         html = self._load_page(date)
         if not html:
-            self._cache[iso] = {}
             return {}
 
         parsed = self._parse_match_table(html)

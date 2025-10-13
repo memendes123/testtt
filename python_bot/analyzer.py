@@ -173,7 +173,9 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
         btts = market_lookup.get("both_teams_score", [])
 
         forebet = match.get("forebet") if isinstance(match, dict) else None
+        api_prediction = match.get("apiFootballPrediction") if isinstance(match, dict) else None
         forebet_used = False
+        api_prediction_used = False
 
         predictions = entry["predictions"]
 
@@ -224,6 +226,50 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             _apply_forebet("under25Probability", "under25Probability")
             _apply_forebet("bttsYesProbability", "bttsYesProbability")
             _apply_forebet("bttsNoProbability", "bttsNoProbability")
+
+        if isinstance(api_prediction, dict):
+            def _apply_api_prediction(source_key: str, target_key: str) -> None:
+                nonlocal api_prediction_used
+                value = api_prediction.get(source_key)
+                if value is None:
+                    return
+                try:
+                    number = int(round(float(value)))
+                except (TypeError, ValueError):
+                    return
+                if predictions[target_key] == 0 and number > 0:
+                    predictions[target_key] = max(0, min(100, number))
+                    api_prediction_used = True
+
+            _apply_api_prediction("homeWinProbability", "homeWinProbability")
+            _apply_api_prediction("drawProbability", "drawProbability")
+            _apply_api_prediction("awayWinProbability", "awayWinProbability")
+
+            predicted_goals = api_prediction.get("predictedGoals")
+            if (
+                isinstance(predicted_goals, dict)
+                and predicted_goals.get("home") is not None
+                and predicted_goals.get("away") is not None
+            ):
+                try:
+                    total_goals = float(predicted_goals.get("home") or 0) + float(
+                        predicted_goals.get("away") or 0
+                    )
+                except (TypeError, ValueError):
+                    total_goals = 0.0
+
+                if total_goals >= 3 and predictions["over25Probability"] == 0:
+                    predictions["over25Probability"] = max(60, min(85, int(round(55 + (total_goals - 2.5) * 18))))
+                elif total_goals <= 2 and predictions["under25Probability"] == 0:
+                    predictions["under25Probability"] = max(60, min(85, int(round(58 + (2 - total_goals) * 18))))
+
+            under_over_hint = api_prediction.get("underOver")
+            normalized_hint = _normalize_label(under_over_hint)
+            if normalized_hint:
+                if _is_over_25_label(normalized_hint) and predictions["over25Probability"] == 0:
+                    predictions["over25Probability"] = 62
+                elif _is_under_25_label(normalized_hint) and predictions["under25Probability"] == 0:
+                    predictions["under25Probability"] = 62
 
         recommendations: List[str] = []
         confidence_score = 0
@@ -305,6 +351,9 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
 
         if forebet_used:
             notes.append("Probabilidades 1X2 complementadas com dados da Forebet")
+
+        if api_prediction_used:
+            notes.append("Probabilidades complementadas com previsões oficiais da API-FOOTBALL")
 
 
         def _form_strength(form: Optional[Dict[str, object]]) -> Optional[float]:
