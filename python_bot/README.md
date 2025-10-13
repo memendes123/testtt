@@ -91,3 +91,12 @@ Para manter o monitor sempre disponível num servidor Linux com systemd:
    ```
 
 O serviço reinicia automaticamente o monitor em caso de falha ou reboot.
+
+## Fontes de dados e limites
+
+O bot combina duas origens principais de informação:
+
+- **API-Football (API-Sports)**: fornece os fixtures, estatísticas recentes, odds e histórico de confrontos. É necessário um token válido em `FOOTBALL_API_KEY`.
+- **Forebet**: usado para complementar com probabilidades de resultado, over/under e BTTS.
+
+Cada chamada à API-Football consome quota do plano contratado. Para evitar bloqueios após algumas dezenas de minutos, o código mantém um cache em memória para formulários de equipa, confrontos diretos e odds durante alguns minutos. Mesmo assim, intervalos muito curtos ou um número elevado de competições podem exceder os limites do plano gratuito; aumente o `--interval` ou reduza `FOOTBALL_MAX_FIXTURES` caso continue a receber mensagens de "Rate limit" nos logs.
