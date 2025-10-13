@@ -204,6 +204,29 @@ def format_predictions_message(
         f"• {high_confidence} jogos de alta confiança | {medium_confidence} de média confiança",
     ]
     message_lines.extend(summary)
+
+    quality = analysis.get("dataQuality") or {}
+    quality_lines: List[str] = []
+    missing_odds = int(quality.get("matchesMissingOdds", 0) or 0)
+    if missing_odds:
+        quality_lines.append(f"• {missing_odds} jogos sem odds diretas na API")
+    fallback_total = int(quality.get("forebetFallbacks", 0) or 0) + int(
+        quality.get("apiFootballFallbacks", 0) or 0
+    )
+    if fallback_total:
+        quality_lines.append(
+            f"• {fallback_total} jogos complementados com fontes Forebet/API-FOOTBALL"
+        )
+    form_fallbacks = int(quality.get("formFallbacks", 0) or 0)
+    if form_fallbacks:
+        quality_lines.append(
+            f"• {form_fallbacks} jogos com probabilidades estimadas via forma recente"
+        )
+
+    if quality_lines:
+        message_lines.append("🔍 <b>Saúde dos dados:</b>")
+        message_lines.extend(quality_lines)
+
     message_lines.append("")
 
     breakdown = analysis.get("breakdownByRegion", [])

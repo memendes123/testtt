@@ -164,7 +164,22 @@ def _request_with_retry(
     wait_seconds = 30
 
     while True:
-        response = requests.get(url, params=params, headers=headers, timeout=timeout)
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=timeout)
+        except requests.RequestException as exc:
+            backoff = min(wait_seconds, 120)
+            if attempt >= max_retries:
+                raise FetchError(f"Erro de rede ao contactar {url}") from exc
+            if logger:
+                logger.warning(
+                    "Falha de rede ao chamar %s. A aguardar %ss para retry.",
+                    url,
+                    backoff,
+                )
+            time.sleep(backoff)
+            attempt += 1
+            wait_seconds *= 2
+            continue
 
         if response.status_code == 429:
             retry_after_raw = response.headers.get("Retry-After")
@@ -186,8 +201,12 @@ def _request_with_retry(
             wait_seconds *= 2
             continue
 
-        if response.status_code >= 500 and attempt < max_retries:
+        if response.status_code >= 500:
             backoff = min(wait_seconds, 120)
+            if attempt >= max_retries:
+                raise FetchError(
+                    f"Erro {response.status_code} do servidor ao chamar {url}"
+                )
             if logger:
                 logger.warning(
                     "Erro %s do servidor ao chamar %s. A aguardar %ss para retry.",
@@ -199,6 +218,16 @@ def _request_with_retry(
             attempt += 1
             wait_seconds *= 2
             continue
+
+        if response.status_code in (401, 403):
+            raise FetchError(
+                f"Acesso negado (HTTP {response.status_code}) ao chamar {url}"
+            )
+
+        if response.status_code >= 400 and response.status_code not in (404,):
+            raise FetchError(
+                f"Falha na chamada {url}: HTTP {response.status_code}"
+            )
 
         return response
 

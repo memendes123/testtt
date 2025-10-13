@@ -133,6 +133,16 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
     logger.info("Analyzing matches", extra={"count": len(matches)})
 
     analyzed: List[Dict[str, object]] = []
+    quality_stats = {
+        "totalMatches": len(matches),
+        "matchesMissingOdds": 0,
+        "matchesMissingMatchWinnerMarket": 0,
+        "matchesMissingGoalLineMarket": 0,
+        "matchesMissingBttsMarket": 0,
+        "forebetFallbacks": 0,
+        "apiFootballFallbacks": 0,
+        "formFallbacks": 0,
+    }
 
     for match in matches:
         entry = {
@@ -153,6 +163,7 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
 
         odds = match.get("odds") or []
         if not odds:
+            quality_stats["matchesMissingOdds"] += 1
             analyzed.append(entry)
             continue
 
@@ -171,6 +182,13 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
         match_winner = market_lookup.get("match_winner", [])
         over_under = market_lookup.get("goals_over_under", [])
         btts = market_lookup.get("both_teams_score", [])
+
+        if not match_winner:
+            quality_stats["matchesMissingMatchWinnerMarket"] += 1
+        if not over_under:
+            quality_stats["matchesMissingGoalLineMarket"] += 1
+        if not btts:
+            quality_stats["matchesMissingBttsMarket"] += 1
 
         forebet = match.get("forebet") if isinstance(match, dict) else None
         api_prediction = match.get("apiFootballPrediction") if isinstance(match, dict) else None
@@ -227,6 +245,9 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             _apply_forebet("bttsYesProbability", "bttsYesProbability")
             _apply_forebet("bttsNoProbability", "bttsNoProbability")
 
+        if forebet_used:
+            quality_stats["forebetFallbacks"] += 1
+
         if isinstance(api_prediction, dict):
             def _apply_api_prediction(source_key: str, target_key: str) -> None:
                 nonlocal api_prediction_used
@@ -270,6 +291,9 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
                     predictions["over25Probability"] = 62
                 elif _is_under_25_label(normalized_hint) and predictions["under25Probability"] == 0:
                     predictions["under25Probability"] = 62
+
+        if api_prediction_used:
+            quality_stats["apiFootballFallbacks"] += 1
 
         recommendations: List[str] = []
         confidence_score = 0
@@ -408,6 +432,8 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
                 base += draw_bias / total_samples
             return max(0.5, min(base, 1.8))
 
+        used_form_fallback = False
+
         if (
             predictions["homeWinProbability"] == 0
             and predictions["awayWinProbability"] == 0
@@ -438,6 +464,8 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
                     predictions["homeWinProbability"] = max(0, min(100, home_pct))
                     predictions["drawProbability"] = max(0, min(100, draw_pct))
                     predictions["awayWinProbability"] = max(0, min(100, away_pct))
+
+            used_form_fallback = True
 
         goal_samples: List[float] = []
         for form in (home_form, away_form):
@@ -508,6 +536,9 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
 
         analyzed.append(entry)
 
+        if used_form_fallback:
+            quality_stats["formFallbacks"] += 1
+
     confidence_rank = {"high": 3, "medium": 2, "low": 1}
 
     def score(item: Dict[str, object]) -> int:
@@ -556,6 +587,31 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
             }
         )
 
+    actionable_matches = [match for match in analyzed if match.get("recommendedBets") or match.get("analysisNotes")]
+    without_probabilities = [
+        match
+        for match in analyzed
+        if not any(
+            int((match.get("predictions", {}) or {}).get(key, 0) or 0) > 0
+            for key in (
+                "homeWinProbability",
+                "drawProbability",
+                "awayWinProbability",
+                "over25Probability",
+                "under25Probability",
+                "bttsYesProbability",
+                "bttsNoProbability",
+            )
+        )
+    ]
+
+    quality_stats.update(
+        {
+            "matchesWithActionableData": len(actionable_matches),
+            "matchesWithoutProbabilities": len(without_probabilities),
+        }
+    )
+
     return {
         "totalAnalyzed": len(analyzed),
         "bestMatches": sorted_matches[:10],
@@ -564,4 +620,5 @@ def analyze_matches(matches: List[Dict[str, object]], index: CompetitionIndex, l
         "mediumConfidenceCount": sum(1 for match in sorted_matches if match.get("confidence") == "medium"),
         "breakdownByRegion": breakdown,
         "bestMatchesByRegion": best_by_region,
+        "dataQuality": quality_stats,
     }
