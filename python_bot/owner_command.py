@@ -5,13 +5,13 @@ import logging
 import time
 from pathlib import Path
 from threading import Event
-from typing import Optional
+from typing import Optional, Tuple
 
 import requests
 
 from .analyzer import analyze_matches
-from .competitions import load_index
-from .config import load_settings
+from .competitions import CompetitionIndex, load_index
+from .config import Settings, load_settings
 from .llm import ChatGPTClient
 from .manual_fetcher import locate_fixture
 from .telegram_client import TelegramClient
@@ -27,7 +27,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def extract_command(text: Optional[str]) -> Optional[tuple[str, str]]:
+def extract_command(text: Optional[str]) -> Optional[Tuple[str, str]]:
     if not text:
         return None
     stripped = text.strip()
@@ -73,7 +73,9 @@ def build_response_message(match: dict, analysis: dict, gpt_summary: Optional[st
     lines.append(f"• Casa: {predictions.get('homeWinProbability', 0)}%")
     lines.append(f"• Empate: {predictions.get('drawProbability', 0)}%")
     lines.append(f"• Fora: {predictions.get('awayWinProbability', 0)}%")
-    lines.append(f"• Over 2.5: {predictions.get('over25Probability', 0)}% | Under 2.5: {predictions.get('under25Probability', 0)}%")
+    lines.append(
+        f"• Over 2.5: {predictions.get('over25Probability', 0)}% | Under 2.5: {predictions.get('under25Probability', 0)}%"
+    )
     lines.append(
         f"• BTTS Sim: {predictions.get('bttsYesProbability', 0)}% | BTTS Não: {predictions.get('bttsNoProbability', 0)}%"
     )
@@ -102,18 +104,20 @@ def build_response_message(match: dict, analysis: dict, gpt_summary: Optional[st
     return "\n".join(lines)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
-    args = parse_args(argv)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    logger = logging.getLogger("owner-command")
+def listen_for_owner_commands(
+    settings: Settings,
+    *,
+    index: Optional[CompetitionIndex] = None,
+    poll_interval: int = 5,
+    logger: Optional[logging.Logger] = None,
+    stop_event: Optional[Event] = None,
+) -> int:
+    logger = logger or logging.getLogger("owner-command")
+    index = index or load_index()
 
-    try:
-        settings = load_settings(Path(args.env) if args.env else None)
-    except RuntimeError as exc:
-        logger.error("Erro ao carregar configuração: %s", exc)
-        return 1
+    poll_interval = max(1, int(poll_interval))
 
-    allowed_ids = set(settings.telegram_admin_ids)
+    allowed_ids = {str(admin_id) for admin_id in settings.telegram_admin_ids}
     if settings.telegram_owner_id:
         allowed_ids.add(str(settings.telegram_owner_id))
 
@@ -128,7 +132,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     offset: Optional[int] = None
 
-    logger.info("Iniciando listener de comandos do owner")
+    logger.info(
+        "Iniciando listener de comandos do owner",
+        extra={"pollInterval": poll_interval, "adminCount": len(allowed_ids)},
+    )
 
     def _wait(seconds: int) -> bool:
         if stop_event:
@@ -139,7 +146,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     while True:
         if stop_event and stop_event.is_set():
             logger.info("Encerrando listener de comandos (stop solicitado)")
-            break
+            return 0
+
         try:
             poll_timeout = max(1, poll_interval)
             params = {"timeout": poll_timeout}
@@ -155,7 +163,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.error("Falha ao obter updates do Telegram: %s", exc)
             if _wait(max(1, poll_interval)):
-                break
+                return 0
             continue
 
         for update in payload.get("result", []) or []:
@@ -178,7 +186,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 )
                 logger.info(
                     "Comando ignorado por utilizador não autorizado",
-                    extra={"chatId": chat_id},
+                    extra={"chatId": chat_id, "senderId": sender_id},
                 )
                 continue
 
@@ -188,7 +196,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 telegram.send_message(error, chat_id=str(chat_id))
                 continue
             if not match:
-                telegram.send_message("Não foi possível localizar jogo para análise.", chat_id=str(chat_id))
+                telegram.send_message(
+                    "Não foi possível localizar jogo para análise.", chat_id=str(chat_id)
+                )
                 continue
 
             analysis = analyze_matches([match], index, logger=logger)
@@ -240,7 +250,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     try:
-        listen_for_owner_commands(
+        return listen_for_owner_commands(
             settings,
             index=load_index(),
             poll_interval=args.poll_interval,
@@ -248,7 +258,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
     except KeyboardInterrupt:
         logger.info("Listener interrompido pelo utilizador")
-    return 0
+        return 0
 
 
 if __name__ == "__main__":
