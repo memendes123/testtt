@@ -13,6 +13,7 @@ from .analyzer import analyze_matches
 from .competitions import load_index
 from .config import load_settings
 from .fetcher import FetchError, fetch_matches
+from .forebet import ForebetClient
 from .telegram_client import TelegramClient
 
 
@@ -95,6 +96,7 @@ class LiveMonitor:
         self.dry_run = dry_run
         self.logger = logger
         self.client = None if dry_run else TelegramClient(settings, logger=logger)
+        self.forebet_client = ForebetClient(logger=logger)
         self._sent_flags: Dict[int, Set[str]] = {}
         self._score_cache: Dict[int, Tuple[int, int]] = {}
         self._analysis_counts: Dict[int, int] = {}
@@ -356,6 +358,7 @@ class LiveMonitor:
                     self.index,
                     logger=self.logger,
                     status="LIVE",
+                    forebet_client=self.forebet_client,
                 )
             except FetchError as exc:
                 self.logger.error("Falha ao buscar jogos ao vivo: %s", exc)

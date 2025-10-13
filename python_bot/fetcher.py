@@ -398,6 +398,7 @@ def fetch_matches(
     index: CompetitionIndex,
     logger: Optional[logging.Logger] = None,
     status: str = "NS",
+    forebet_client: Optional[ForebetClient] = None,
 ) -> Dict[str, object]:
     """Fetch fixtures and odds for the given date."""
     target_date = date or datetime.now(timezone.utc)
@@ -449,7 +450,7 @@ def fetch_matches(
     region_counters = {region: 0 for region in index.region_order}
     matches: List[Dict[str, object]] = []
 
-    forebet_client = ForebetClient(logger=logger)
+    forebet_client = forebet_client or ForebetClient(logger=logger)
 
 
     def get_team_form(team_id: Optional[int]) -> Optional[Dict[str, object]]:
