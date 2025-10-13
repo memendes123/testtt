@@ -20,11 +20,21 @@ TELEGRAM_ADMIN_IDS=987654321,111111111
 
 2. Install dependencies (Python 3.11+ recommended):
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r python_bot/requirements.txt
-```
+   *Linux/macOS*
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install -r python_bot/requirements.txt
+   ```
+
+   *Windows (PowerShell)*
+
+   ```powershell
+   py -m venv .venv
+   .venv\Scripts\Activate.ps1
+   py -m pip install -r python_bot/requirements.txt
+   ```
 
 3. Run a dry run for today (no Telegram message is sent):
 
