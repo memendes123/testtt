@@ -39,7 +39,7 @@ class CompetitionIndex:
 
     @classmethod
     def from_json(cls, path: Path) -> "CompetitionIndex":
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
         competitions: List[Competition] = []
         alias_index: List[tuple[set[str], Competition]] = []
         id_index: Dict[int, Competition] = {}

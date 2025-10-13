@@ -49,10 +49,18 @@ FOOTBALL_MAX_FIXTURES=120
 ### Python
 
 1. **Instale as dependências:**
+   *Linux/macOS*
    ```bash
    python -m venv .venv
-   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   source .venv/bin/activate
    pip install -r python_bot/requirements.txt
+   ```
+
+   *Windows (PowerShell)*
+   ```powershell
+   py -m venv .venv
+   .venv\Scripts\Activate.ps1
+   py -m pip install -r python_bot/requirements.txt
    ```
 2. **Rode um teste sem enviar mensagem:**
    ```bash
