@@ -93,6 +93,8 @@ class ForebetClient:
         }
         self._session = self._create_session(self._desktop_headers)
         self._cache: Dict[str, Dict[str, ForebetProbabilities]] = {}
+        self._failure_timestamps: Dict[str, float] = {}
+        self._failure_backoff_seconds = 180
         self._bs4_warning_emitted = False
         self._logger = logger or logging.getLogger(__name__)
 
@@ -324,12 +326,18 @@ class ForebetClient:
         if iso in self._cache:
             return self._cache[iso]
 
+        now = time.monotonic()
+        last_failure = self._failure_timestamps.get(iso)
+        if last_failure is not None and now - last_failure < self._failure_backoff_seconds:
+            return {}
+
         html = self._load_page(date)
         if not html:
             return {}
 
         parsed = self._parse_match_table(html)
         self._cache[iso] = parsed
+        self._failure_timestamps.pop(iso, None)
         return parsed
 
     def get_probabilities(
