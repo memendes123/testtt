@@ -20,6 +20,7 @@ class Settings:
     telegram_admin_ids: tuple[str, ...] = ()
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-5.0"
+    telegram_message_interval_seconds: int = 120
 
 
 def load_settings(env_file: Optional[Path] = None) -> Settings:
@@ -49,6 +50,7 @@ def load_settings(env_file: Optional[Path] = None) -> Settings:
     max_fixtures = int(os.getenv("FOOTBALL_MAX_FIXTURES", "120"))
     openai_api_key = os.getenv("OPENAI_API_KEY")
     openai_model = os.getenv("OPENAI_MODEL", "gpt-5.0")
+    message_interval = int(os.getenv("TELEGRAM_MESSAGE_INTERVAL_SECONDS", "120"))
 
     return Settings(
         football_api_key=api_key,
@@ -61,4 +63,5 @@ def load_settings(env_file: Optional[Path] = None) -> Settings:
         telegram_admin_ids=admin_ids,
         openai_api_key=openai_api_key,
         openai_model=openai_model,
+        telegram_message_interval_seconds=message_interval,
     )

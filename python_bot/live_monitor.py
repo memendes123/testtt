@@ -17,6 +17,7 @@ from .telegram_client import TelegramClient
 
 
 CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+MAX_ALERTS_PER_MATCH = 2
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -89,18 +90,23 @@ class LiveMonitor:
         self.index = index
         self.chat_id = chat_id
         self.interval = max(30, interval)
+        self.min_confidence_label = min_confidence
         self.min_rank = CONFIDENCE_RANK.get(min_confidence, 1)
         self.dry_run = dry_run
         self.logger = logger
         self.client = None if dry_run else TelegramClient(settings, logger=logger)
         self._sent_flags: Dict[int, Set[str]] = {}
         self._score_cache: Dict[int, Tuple[int, int]] = {}
+        self._analysis_counts: Dict[int, int] = {}
+        self.max_alerts_per_match = MAX_ALERTS_PER_MATCH
+        self.message_interval = max(0, settings.telegram_message_interval_seconds)
+        self._last_sent_at: Optional[float] = None
         self.stop_event = stop_event
 
     def _should_stop(self) -> bool:
         return bool(self.stop_event and self.stop_event.is_set())
 
-    def _wait(self, seconds: int) -> bool:
+    def _wait(self, seconds: float) -> bool:
         if self.stop_event:
             return self.stop_event.wait(seconds)
         time.sleep(seconds)
@@ -129,11 +135,13 @@ class LiveMonitor:
                 self.logger.debug("Removendo cache de alerta para jogo finalizado", extra={"fixtureId": fixture_key})
                 self._sent_flags.pop(fixture_key, None)
                 self._score_cache.pop(fixture_key, None)
+                self._analysis_counts.pop(fixture_key, None)
         # Garanta que não guardamos jogos antigos sem status
         for fixture_key in list(self._sent_flags):
             if fixture_key not in active_ids:
                 self._sent_flags.pop(fixture_key, None)
                 self._score_cache.pop(fixture_key, None)
+                self._analysis_counts.pop(fixture_key, None)
 
     @staticmethod
     def _coerce_score(value: Optional[object]) -> Optional[int]:
@@ -296,22 +304,48 @@ class LiveMonitor:
 
         return "\n".join(lines)
 
-    def _send(self, message: str) -> None:
+    def _send(self, message: str) -> bool:
+        if self._respect_message_delay():
+            return False
+
         if self.dry_run:
             print(message)
             print("-" * 80)
-            return
+            self._last_sent_at = time.monotonic()
+            return True
 
         if not self.client:
-            return
+            return False
 
         self.client.send_message(message, chat_id=self.chat_id)
+        self._last_sent_at = time.monotonic()
+        return True
+
+    def _respect_message_delay(self) -> bool:
+        if self.message_interval <= 0:
+            return False
+
+        if self._last_sent_at is None:
+            return False
+
+        elapsed = time.monotonic() - self._last_sent_at
+        remaining = self.message_interval - elapsed
+        if remaining <= 0:
+            return False
+
+        self.logger.debug(
+            "Aguardando %ss antes do próximo alerta", round(remaining, 1)
+        )
+
+        return self._wait(remaining)
 
     def run(self) -> None:
         self.logger.info(
-            "Monitor live iniciado (intervalo=%ss, min_confidence=%s)",
+            "Monitor live iniciado (intervalo=%ss, min_confidence=%s, atraso=%ss, max_alerts=%s)",
             self.interval,
-            self.min_rank,
+            self.min_confidence_label,
+            self.message_interval,
+            self.max_alerts_per_match,
         )
 
         while not self._should_stop():
@@ -348,12 +382,21 @@ class LiveMonitor:
 
                 fixture_id, recommendations, new_flags, events = result
                 message = self._format_message(match, recommendations, new_flags, events)
-                try:
-                    self._send(message)
-                    self._sent_flags.setdefault(fixture_id, set()).update(new_flags)
-                    self.logger.info(
-                        "Alerta enviado", extra={"fixtureId": fixture_id, "flags": list(new_flags)}
+                current_count = self._analysis_counts.get(fixture_id, 0)
+                if current_count >= self.max_alerts_per_match:
+                    self.logger.debug(
+                        "Limite de análises atingido para jogo", extra={"fixtureId": fixture_id}
                     )
+                    self._sent_flags.setdefault(fixture_id, set()).update(new_flags)
+                    continue
+                try:
+                    sent = self._send(message)
+                    self._sent_flags.setdefault(fixture_id, set()).update(new_flags)
+                    if sent:
+                        self._analysis_counts[fixture_id] = current_count + 1
+                        self.logger.info(
+                            "Alerta enviado", extra={"fixtureId": fixture_id, "flags": list(new_flags)}
+                        )
                 except Exception as exc:  # noqa: BLE001
                     self.logger.error("Falha ao enviar alerta ao vivo", exc_info=exc)
 

@@ -16,6 +16,7 @@ FOOTBALL_API_BOOKMAKER=6
 FOOTBALL_MAX_FIXTURES=120
 TELEGRAM_OWNER_ID=123456789
 TELEGRAM_ADMIN_IDS=987654321,111111111
+TELEGRAM_MESSAGE_INTERVAL_SECONDS=120
 ```
 
 2. Install dependencies (Python 3.11+ recommended):
@@ -77,7 +78,7 @@ Para receber alertas em tempo real quando surgirem novas recomendações durante
 python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium
 ```
 
-O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
+O monitor consulta a API a cada `--interval` segundos (mínimo 30s), analisa os jogos em andamento e envia notificações quando surgir uma recomendação inédita, quando a confiança subir para o patamar configurado (`low`, `medium`, `high`) **ou** sempre que um novo golo for marcado. Para evitar spam, cada jogo envia no máximo duas análises e há um atraso mínimo entre mensagens (padrão 120 segundos, configurável via `TELEGRAM_MESSAGE_INTERVAL_SECONDS`). Use `--dry-run` para testar no terminal sem enviar mensagens e `--chat-id` para direcionar os alertas para um destino específico.
 
 Para manter o monitor sempre disponível num servidor Linux com systemd:
 
