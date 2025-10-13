@@ -6,7 +6,6 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from html import unescape
-from time import monotonic
 from typing import Dict, Optional, cast, Literal
 
 import requests
@@ -92,8 +91,7 @@ class ForebetClient:
             "Connection": "keep-alive",
             "Referer": "https://m.forebet.com/en/football-predictions",
         }
-        self._desktop_session = self._create_session(self._desktop_headers)
-        self._mobile_session = self._create_session(self._mobile_headers)
+        self._session = self._create_session(self._desktop_headers)
         self._cache: Dict[str, Dict[str, ForebetProbabilities]] = {}
         self._failure_timestamps: Dict[str, float] = {}
         self._failure_backoff_seconds = 180
@@ -107,26 +105,24 @@ class ForebetClient:
         session.headers.setdefault("Upgrade-Insecure-Requests", "1")
         return session
 
-    def _get_session(self, session_type: Literal["desktop", "mobile"]) -> requests.Session:
-        if session_type == "desktop":
-            return self._desktop_session
-        return self._mobile_session
+    def _reset_session(self, *, mobile: bool = False) -> None:
+        headers = self._mobile_headers if mobile else self._desktop_headers
+        self._session.close()
+        self._session = self._create_session(headers)
 
-    def _refresh_session(self, session_type: Literal["desktop", "mobile"]) -> None:
-        if session_type == "desktop":
-            self._desktop_session.close()
-            self._desktop_session = self._create_session(self._desktop_headers)
-            self._warmup(self._desktop_session, "https://www.forebet.com/en/football-predictions")
-        else:
-            self._mobile_session.close()
-            self._mobile_session = self._create_session(self._mobile_headers)
-            self._warmup(self._mobile_session, "https://m.forebet.com/en/football-predictions")
+    def _warmup_session(self) -> None:
+        warmup_targets = [
+            ("https://www.forebet.com/en/football-predictions", self._desktop_headers),
+            ("https://m.forebet.com/en/football-predictions", self._mobile_headers),
+        ]
 
-    def _warmup(self, session: requests.Session, url: str) -> None:
-        try:
-            session.get(url, timeout=30)
-        except Exception:  # noqa: BLE001 - best effort warm-up only
-            pass
+        for url, headers in warmup_targets:
+            try:
+                response = self._session.get(url, headers=headers, timeout=30)
+                if response.status_code == 200:
+                    return
+            except Exception:  # noqa: BLE001 - melhor esforço
+                continue
 
     def _get_slug(self, date: datetime) -> str:
         today = datetime.utcnow().date()
@@ -137,72 +133,66 @@ class ForebetClient:
     def _load_page(self, date: datetime) -> Optional[str]:
         slug = self._get_slug(date)
         url = FOREBET_URL_TEMPLATE.format(slug=slug)
-        last_status: Optional[int] = None
+        try:
+            response = self._session.get(url, timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("Unable to fetch Forebet page", extra={"error": str(exc), "url": url})
+            return None
 
-        response = self._request_with_session("desktop", url)
-        if response and response.status_code == 200:
+        if response.status_code == 200:
             return response.text
-        if response is None or response.status_code in {403, 429} or (response.status_code >= 500):
-            self._refresh_session("desktop")
-            response = self._request_with_session("desktop", url)
-            if response and response.status_code == 200:
-                self._logger.info(
-                    "Forebet request recovered after desktop session refresh",
-                    extra={"url": url},
+
+        if response.status_code == 403:
+            self._warmup_session()
+
+            try:
+                retry_response = self._session.get(url, timeout=30)
+                if retry_response.status_code == 200:
+                    self._logger.info(
+                        "Forebet request recovered after warm-up",
+                        extra={"url": url},
+                    )
+                    return retry_response.text
+                response = retry_response
+            except Exception:  # noqa: BLE001 - prosseguir para fallback móvel
+                pass
+
+            mobile_url = url.replace("www.forebet.com", "m.forebet.com")
+            try:
+                mobile_response = self._session.get(
+                    mobile_url, headers=self._mobile_headers, timeout=30
                 )
-                return response.text
-        if response is not None:
-            last_status = response.status_code
+            except Exception:  # noqa: BLE001
+                mobile_response = None
 
-        mobile_url = url.replace("www.forebet.com", "m.forebet.com")
-        response = self._request_with_session("mobile", mobile_url)
-        if response and response.status_code == 200:
-            self._logger.info(
-                "Forebet mobile fallback used successfully",
-                extra={"url": mobile_url},
-            )
-            return response.text
-        if response is None or response.status_code in {403, 429} or (response.status_code >= 500):
-            self._refresh_session("mobile")
-            response = self._request_with_session("mobile", mobile_url)
-            if response and response.status_code == 200:
+            if mobile_response and mobile_response.status_code == 200:
                 self._logger.info(
-                    "Forebet request recovered after mobile session refresh",
+                    "Forebet mobile fallback used successfully",
                     extra={"url": mobile_url},
                 )
-                return response.text
-        if response is not None:
-            last_status = response.status_code
+                return mobile_response.text
+
+            self._reset_session(mobile=True)
+            try:
+                reset_response = self._session.get(mobile_url, timeout=30)
+                if reset_response.status_code == 200:
+                    self._logger.info(
+                        "Forebet session reset with mobile headers",
+                        extra={"url": mobile_url},
+                    )
+                    return reset_response.text
+                response = reset_response
+            except Exception as exc:  # noqa: BLE001
+                self._logger.warning(
+                    "Forebet mobile fallback after reset failed",
+                    extra={"url": mobile_url, "error": str(exc)},
+                )
 
         self._logger.warning(
             "Forebet request failed",
-            extra={"url": url, "status": last_status},
+            extra={"url": url, "status": response.status_code},
         )
         return None
-
-    def _request_with_session(
-        self,
-        session_type: Literal["desktop", "mobile"],
-        url: str,
-    ) -> Optional[requests.Response]:
-        session = self._get_session(session_type)
-        try:
-            response = session.get(url, timeout=(10, 25))
-        except Exception as exc:  # noqa: BLE001
-            self._logger.warning(
-                "Forebet %s session request error",
-                session_type,
-                extra={"url": url, "error": str(exc)},
-            )
-            return None
-
-        if response.status_code != 200:
-            self._logger.debug(
-                "Forebet %s session returned non-success status",
-                session_type,
-                extra={"url": url, "status": response.status_code},
-            )
-        return response
 
     def _parse_match_table(self, html: str) -> Dict[str, ForebetProbabilities]:
         if BeautifulSoup is not None:
@@ -336,14 +326,13 @@ class ForebetClient:
         if iso in self._cache:
             return self._cache[iso]
 
-        now = monotonic()
+        now = time.monotonic()
         last_failure = self._failure_timestamps.get(iso)
         if last_failure is not None and now - last_failure < self._failure_backoff_seconds:
             return {}
 
         html = self._load_page(date)
         if not html:
-            self._failure_timestamps[iso] = now
             return {}
 
         parsed = self._parse_match_table(html)
