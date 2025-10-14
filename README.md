@@ -1,13 +1,13 @@
 # Bot de Previsões de Futebol – Guia Completo de Auto-hospedagem
 
-Este repositório contém duas portas independentes (Python e Node.js) do fluxo original criado no Mastra. Ambas implementam o mesmo pipeline:
+Este repositório agora fornece uma única implementação 100% Python do fluxo original criado no Mastra. Toda a lógica de busca, análise e envio foi portada para scripts Python modulares que podem ser executados em qualquer VPS ou ambiente local sem depender de Node.js.
 
 1. **Busca dos jogos e odds** na API Football para as competições listadas em `shared/competitions.json`.
 2. **Análise das probabilidades**, convertendo as odds em percentuais, destacando favoritos, mercados de gols e ambos marcam (ver `python_bot/analyzer.py`).
 3. **Formatação do relatório** em blocos por região, com destaques de confiança e resumo agregado.
 4. **Envio opcional via Telegram**, usando o bot e canal que você configurar.
 
-> As duas versões produzem o mesmo texto e podem ser usadas tanto para execuções avulsas quanto para rotinas automatizadas (cron, PM2, systemd etc.).
+> A versão Python cobre todos os cenários da porta antiga em Node.js (incluindo o comando `/insight` exclusivo para o owner, integrações com ChatGPT e monitor em tempo real) e segue compatível com as estruturas de dados partilhadas em `shared/`.
 
 ---
 
@@ -82,24 +82,7 @@ FOOTBALL_MAX_FIXTURES=120
    ```
    Esse processo consulta os jogos em andamento a cada `--interval` segundos (mínimo 30s) e dispara imediatamente qualquer nova análise ou aumento de confiança. Ele é o comando indicado para manter avisos em tempo real sem depender de um loop com `sleep 3600`.
 
-### Node.js
-
-1. **Instale dependências (Node 18+):** `npm install`
-   *O projeto mantém o `@mastra/core` na série 0.18 para continuar compatível com `@mastra/libsql`. Caso personalize as dependências, mantenha versões < 0.19 ou atualize os dois pacotes em conjunto.*
-2. **Execute o CLI em modo teste:**
-   ```bash
-   node js_bot/index.js --env .env --dry-run
-   ```
-3. **Envie para o Telegram:**
-   ```bash
-   node js_bot/index.js --env .env
-   ```
-4. **Mantenha rodando continuamente:** use `pm2` ou `forever` para agendar execuções:
-   ```bash
-   npx pm2 start "node js_bot/index.js --env /caminho/.env" --name futebol-bot --cron "0 9 * * *"
-   ```
-
-> Ambas as versões aceitam `--date YYYY-MM-DD` para backfill e `--output arquivo.json` para salvar o payload completo.
+> Os comandos acima aceitam `--date YYYY-MM-DD` para backfill e `--output arquivo.json` para salvar o payload completo.
 
 ### Comando privado com ChatGPT (owner)
 
@@ -143,11 +126,9 @@ Lembre-se: se o computador for desligado, o bot para. Para ficar online 24/7 use
 
 ## 4. Publicando no Replit com execução contínua
 
-1. Faça upload dos diretórios `python_bot`, `js_bot`, `shared` e do arquivo `shared/competitions.json` para o seu Replit.
+1. Faça upload dos diretórios `python_bot`, `shared` e do arquivo `shared/competitions.json` para o seu Replit.
 2. No painel **Secrets**, cadastre as variáveis `FOOTBALL_API_KEY`, `TELEGRAM_BOT_TOKEN` etc.
-3. Escolha qual runtime deseja manter:
-   * **Python (recomendado para alertas 24/7):** defina o comando de execução para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium`.
-   * **Node:** defina o comando de execução para `node js_bot/index.js`.
+3. Defina o comando de execução principal para `python -m python_bot.live_monitor --env .env --interval 120 --min-confidence medium` (ou outro módulo Python da pasta `python_bot` conforme a sua necessidade).
 4. Para manter o Replit sempre ativo:
    * Use o plano Hacker (mantém a instância viva) **ou**
    * Configure um ping externo (ex.: UptimeRobot) chamando a webview gerada pelo Replit a cada 5 minutos.
@@ -172,7 +153,7 @@ Para ver a lógica exata consulte:
 
 * `python_bot/analyzer.py` – regras de probabilidade, recomendações e agrupamento.
 * `python_bot/fetcher.py` – chamada à API-Football com filtros de liga, bookmaker e data.
-* `python_bot/message_builder.py` – montagem do texto final (usado também pela versão Node).
+* `python_bot/message_builder.py` – montagem do texto final reutilizada por todos os comandos Python.
 
 ---
 
@@ -202,7 +183,7 @@ Quando precisar parar o bot para aplicar atualizações ou trocar credenciais, b
 3. **Aplicar a atualização (pull/commit/etc.)**
 4. **Reativar:** remova o `#` e salve novamente com `crontab -e`.
 
-### PM2 (Node.js)
+### PM2 (executando scripts Python)
 
 ```bash
 # Parar o processo
@@ -210,10 +191,10 @@ npx pm2 stop futebol-bot
 
 # Aplicar atualizações no código
 git pull
-npm install
+pip install -r python_bot/requirements.txt
 
 # Subir novamente (ajuste o comando conforme seu fluxo)
-npx pm2 start "node js_bot/index.js --env /caminho/.env" --name futebol-bot --cron "0 9 * * *"
+npx pm2 start "python -m python_bot.main --env /caminho/.env" --name futebol-bot --cron "0 9 * * *"
 
 # Verificar status
 npx pm2 status futebol-bot

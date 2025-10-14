@@ -1,6 +1,6 @@
 # Python Football Predictions Bot
 
-This directory contains a standalone Python port of the original Mastra workflow. It uses the same competition catalogue and reproduces the fetch → analyse → Telegram send pipeline so it can be hosted on a VPS or cron job without the Mastra runtime.
+This directory contains the definitive Python implementation of the original Mastra workflow. It replaces the previous Node.js helper entirely, using the same competition catalogue and reproducing the fetch → analyse → Telegram send pipeline so it can be hosted on a VPS or cron job without the Mastra runtime.
 
 ## Quick start
 

@@ -3,7 +3,7 @@
 ## Visão geral do fluxo actual
 - O pipeline recolhe competições configuradas, chama a API-Football, aplica cálculos próprios e gera um relatório Telegram único. 【F:README.md†L5-L73】【F:python_bot/main.py†L7-L92】
 - A versão Python concentra toda a lógica crítica (fetch → análise → formatação → envio) e é a base recomendada para execuções contínuas e monitorização em tempo real. 【F:python_bot/fetcher.py†L510-L723】【F:python_bot/analyzer.py†L87-L430】【F:python_bot/message_builder.py†L1-L278】
-- O repositório também oferece uma porta Node.js alinhada com o fluxo original do Mastra; útil para ambientes que já orquestram jobs em JavaScript. 【F:README.md†L92-L157】【F:js_bot/index.js†L1-L200】
+- Toda a operação comercial pode ser sustentada apenas com os módulos Python portados do fluxo original do Mastra, eliminando a dependência do runtime Node.js. 【F:README.md†L1-L173】【F:python_bot/main.py†L7-L92】
 
 ## Principais pontos de atenção (antes da melhoria)
 1. **Falta de resiliência a falhas de rede** – Um `requests.get` que explode com `RequestException` terminava o processo inteiro, impactando alertas pagos. 【F:python_bot/fetcher.py†L62-L150】
