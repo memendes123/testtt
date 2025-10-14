@@ -69,3 +69,45 @@ def test_message_appends_llm_insights_alongside_top_matches():
     assert "🔥 <b>TOP GLOBAL (1)</b>" in message
     assert "Alpha vs Beta" in message
     assert "Alpha chega em boa forma ofensiva" in message
+
+
+def test_message_builder_handles_malformed_structures_gracefully():
+    actionable_match = {
+        "teams": {"home": {"name": "Gamma"}, "away": {"name": "Delta"}},
+        "competition": {"name": "Liga"},
+        "time": "15:00",
+        "recommendedBets": ["✅ Vitória Gamma"],
+        "analysisNotes": ["Sequência positiva"],
+        "predictions": {
+            "homeWinProbability": 55,
+            "drawProbability": 25,
+            "awayWinProbability": 20,
+        },
+        "confidence": "high",
+    }
+
+    match_data = {
+        "date": "2025-10-12",
+        "totalMatches": 1,
+        "matches": [actionable_match],
+    }
+
+    analysis = {
+        "totalAnalyzed": 1,
+        "bestMatches": [actionable_match],
+        "allMatches": [None, {"confidence": "high"}],
+        "highConfidenceCount": None,
+        "mediumConfidenceCount": None,
+        "breakdownByRegion": {"region": "EU", "total": 3},
+        "bestMatchesByRegion": {
+            "region": "EU",
+            "label": "Europa",
+            "matches": [None, actionable_match],
+        },
+    }
+
+    message = format_predictions_message(match_data, analysis)
+
+    assert "🏆 <b>PREVISÕES FUTEBOL - 12/10/2025</b>" in message
+    assert "🔥 <b>TOP GLOBAL (1)</b>" in message
+    assert "• 1 jogos de alta confiança | 0 de média confiança" in message
