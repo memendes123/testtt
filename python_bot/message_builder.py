@@ -189,10 +189,16 @@ def format_predictions_message(
         raw_value = analysis.get(key)
         if isinstance(raw_value, int) and raw_value > 0:
             return raw_value
-        matches = analysis.get("allMatches") or []
+
+        matches = analysis.get("allMatches")
         if not isinstance(matches, list):
             return 0
-        return sum(1 for item in matches if item.get("confidence") == label)
+
+        return sum(
+            1
+            for item in matches
+            if isinstance(item, dict) and item.get("confidence") == label
+        )
 
     high_confidence = _confidence_count("highConfidenceCount", "high")
     medium_confidence = _confidence_count("mediumConfidenceCount", "medium")
@@ -229,8 +235,15 @@ def format_predictions_message(
 
     message_lines.append("")
 
-    breakdown = analysis.get("breakdownByRegion", [])
-    active_regions = [region for region in breakdown if region.get("total", 0) > 0]
+    breakdown_raw = analysis.get("breakdownByRegion")
+    breakdown = (
+        [region for region in breakdown_raw if isinstance(region, dict)]
+        if isinstance(breakdown_raw, list)
+        else []
+    )
+    active_regions = [
+        region for region in breakdown if int(region.get("total", 0) or 0) > 0
+    ]
     if active_regions:
         message_lines.append("🌍 <b>Distribuição por Região:</b>")
         for region in active_regions:
@@ -243,11 +256,19 @@ def format_predictions_message(
 
     llm_insights_list = [insight for insight in (llm_insights or []) if isinstance(insight, dict)]
 
-    best_matches_raw = analysis.get("bestMatches", []) or []
+    best_matches_source = analysis.get("bestMatches")
+    best_matches_raw = best_matches_source if isinstance(best_matches_source, list) else []
     best_matches = _filter_actionable(best_matches_raw)
     if not best_matches:
-        fallback_matches = analysis.get("allMatches") or match_data.get("matches") or []
-        if isinstance(fallback_matches, list) and fallback_matches:
+        fallback_matches: List[Dict[str, object]] = []
+        all_matches = analysis.get("allMatches")
+        if isinstance(all_matches, list):
+            fallback_matches.extend(all_matches)
+        matches_from_payload = match_data.get("matches")
+        if isinstance(matches_from_payload, list):
+            fallback_matches.extend(matches_from_payload)
+
+        if fallback_matches:
             best_matches = _filter_actionable(fallback_matches)
     if best_matches:
         top_matches = best_matches[: min(5, len(best_matches))]
@@ -278,7 +299,12 @@ def format_predictions_message(
             message_lines.extend(insight_lines)
             message_lines.append("")
 
-    regional_matches = analysis.get("bestMatchesByRegion", []) or []
+    regional_matches_raw = analysis.get("bestMatchesByRegion")
+    regional_matches = (
+        [region for region in regional_matches_raw if isinstance(region, dict)]
+        if isinstance(regional_matches_raw, list)
+        else []
+    )
     detailed_regions = []
     for region in regional_matches:
         matches = _filter_actionable(region.get("matches", []))
