@@ -334,6 +334,7 @@ class ForebetClient:
 
         html = self._load_page(date)
         if not html:
+            self._failure_timestamps[iso] = now
             return {}
 
         parsed = self._parse_match_table(html)
